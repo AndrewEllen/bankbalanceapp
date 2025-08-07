@@ -2,6 +2,10 @@ import 'package:bankbalanceapp/pages/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'pages/recurring_income_list_page.dart';
+import 'pages/recurring_income_edit_page.dart';
+import 'pages/break_rules_page.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
@@ -18,7 +22,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Bank Balance App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
 
@@ -26,6 +30,11 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: const HomePage(),
+      routes: {
+        '/recurring': (_) => const RecurringIncomeListPage(),
+        '/recurring/add': (_) => const RecurringIncomeEditPage(),
+        '/break-rules': (_) => const BreakRulesPage(),
+      },
     );
   }
 }

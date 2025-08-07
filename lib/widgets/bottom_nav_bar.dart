@@ -178,12 +178,28 @@ class _BottomNavBarState extends State<BottomNavBar> with SingleTickerProviderSt
                 // Nav icons
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: const [
-                    _NavIcon(icon: Icons.home),
-                    _NavIcon(icon: Icons.search),
-                    _NavIcon(icon: Icons.person),
+                  children: [
+                    _NavIcon(
+                      icon: Icons.home,
+                      onPressed: () {
+                        Navigator.popUntil(context, (route) => route.isFirst);
+                      },
+                    ),
+                    _NavIcon(
+                      icon: Icons.attach_money,
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/recurring');
+                      },
+                    ),
+                    _NavIcon(
+                      icon: Icons.person,
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/break-rules');
+                      },
+                    ),
                   ],
                 ),
+
               ],
             ),
           ),
@@ -250,16 +266,21 @@ class _LiquidHighlightPainter extends CustomPainter {
 }
 
 class _NavIcon extends StatelessWidget {
-  const _NavIcon({required this.icon});
+  const _NavIcon({
+    required this.icon,
+    required this.onPressed,
+  });
 
   final IconData icon;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     return IconButton(
       splashRadius: 24,
-      onPressed: () {},
+      onPressed: onPressed,
       icon: Icon(icon, color: Colors.white, size: 26),
     );
   }
 }
+
