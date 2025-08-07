@@ -1,6 +1,8 @@
+
 // lib/models/recurring_income.dart
 import 'dart:convert';
 import 'pay_period.dart';
+import 'deductions.dart';
 
 enum PayCycle { everyWeek, every2Weeks, every4Weeks, monthly }
 
@@ -14,93 +16,65 @@ class RecurringIncome {
 
   final PayCycle cycle;
   final DateTime firstPaymentDate; // this period's payday
+
   final bool enabled;
 
-  /// Advanced mode fields
+  /// Advanced only
   final bool advanced;
-  final double? hourly;          // base hourly
-  final double? overtimeHourly;  // optional
+  final double? hourly;
+  final double? overtimeHourly;
   final double? defaultDailyHours;
-  final List<DayHours>? periodDays; // 4-week grid (28 days ending on payday)
+  final List<DayHours>? periodDays;
 
-  const RecurringIncome({
+  /// OPTIONAL: Persist the deductions used to compute NET for this income.
+  final DeductionsSettings? deductions;
+
+  RecurringIncome({
     required this.id,
     required this.name,
     required this.amount,
     required this.cycle,
     required this.firstPaymentDate,
-    this.enabled = true,
-    // advanced
+    required this.enabled,
     this.advanced = false,
     this.hourly,
     this.overtimeHourly,
     this.defaultDailyHours,
     this.periodDays,
+    this.deductions,
   });
-
-  RecurringIncome copyWith({
-    String? id,
-    String? name,
-    double? amount,
-    PayCycle? cycle,
-    DateTime? firstPaymentDate,
-    bool? enabled,
-    bool? advanced,
-    double? hourly,
-    double? overtimeHourly,
-    double? defaultDailyHours,
-    List<DayHours>? periodDays,
-  }) => RecurringIncome(
-    id: id ?? this.id,
-    name: name ?? this.name,
-    amount: amount ?? this.amount,
-    cycle: cycle ?? this.cycle,
-    firstPaymentDate: firstPaymentDate ?? this.firstPaymentDate,
-    enabled: enabled ?? this.enabled,
-    advanced: advanced ?? this.advanced,
-    hourly: hourly ?? this.hourly,
-    overtimeHourly: overtimeHourly ?? this.overtimeHourly,
-    defaultDailyHours: defaultDailyHours ?? this.defaultDailyHours,
-    periodDays: periodDays ?? this.periodDays,
-  );
-
-  DateTime nextPaymentAfter(DateTime after) {
-    if (!enabled) return after;
-    var d = firstPaymentDate;
-    while (!d.isAfter(after)) {
-      d = _addCycle(d, cycle);
-    }
-    return d;
-  }
-
-  static DateTime _addCycle(DateTime d, PayCycle c) {
-    switch (c) {
-      case PayCycle.everyWeek: return d.add(const Duration(days: 7));
-      case PayCycle.every2Weeks: return d.add(const Duration(days: 14));
-      case PayCycle.every4Weeks: return d.add(const Duration(days: 28));
-      case PayCycle.monthly: return DateTime(d.year, d.month + 1, d.day);
-    }
-  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
     'amount': amount,
-    'cycle': cycle.name,
+    'cycle': cycle.index,
     'firstPaymentDate': firstPaymentDate.toIso8601String(),
     'enabled': enabled,
     'advanced': advanced,
-    'hourly': hourly,
-    'overtimeHourly': overtimeHourly,
-    'defaultDailyHours': defaultDailyHours,
-    'periodDays': periodDays?.map((e) => e.toJson()).toList(),
+    if (hourly != null) 'hourly': hourly,
+    if (overtimeHourly != null) 'overtimeHourly': overtimeHourly,
+    if (defaultDailyHours != null) 'defaultDailyHours': defaultDailyHours,
+    if (periodDays != null) 'periodDays': periodDays!.map((e) => e.toJson()).toList(),
+    if (deductions != null) 'deductions': deductions!.toJson(),
   };
 
   static RecurringIncome fromJson(Map<String, dynamic> j) => RecurringIncome(
     id: j['id'] as String,
     name: j['name'] as String,
     amount: (j['amount'] as num).toDouble(),
-    cycle: PayCycle.values.firstWhere((e) => e.name == j['cycle']),
+    cycle: () {
+      final raw = j['cycle'];
+      if (raw is num) return PayCycle.values[raw.toInt()];
+      if (raw is String) {
+        // Match by enum name
+        return PayCycle.values.firstWhere(
+              (e) => e.toString().split('.').last == raw,
+          orElse: () => PayCycle.every4Weeks, // fallback default
+        );
+      }
+      return PayCycle.every4Weeks;
+    }(),
     firstPaymentDate: DateTime.parse(j['firstPaymentDate'] as String),
     enabled: j['enabled'] as bool? ?? true,
     advanced: j['advanced'] as bool? ?? false,
@@ -110,7 +84,41 @@ class RecurringIncome {
     periodDays: (j['periodDays'] as List?)
       ?.map((e) => DayHours.fromJson(Map<String, dynamic>.from(e as Map)))
       .toList(),
+    deductions: j['deductions'] == null ? null
+      : DeductionsSettings.fromJson(Map<String, dynamic>.from(j['deductions'] as Map)),
   );
+
+  DateTime? nextPaymentAfter(DateTime anchor, {int maxHops = 240}) {
+    if (!enabled) return null;
+    final a = DateTime(anchor.year, anchor.month, anchor.day);
+    var d = DateTime(firstPaymentDate.year, firstPaymentDate.month, firstPaymentDate.day);
+    if (d.isAfter(a)) return d;
+
+    for (var i = 0; i < maxHops; i++) {
+      d = _addCycle(d, cycle);
+      if (d.isAfter(a)) return d;
+    }
+    return null;
+  }
+
+  static DateTime _addCycle(DateTime d, PayCycle c) {
+    switch (c) {
+      case PayCycle.everyWeek:    return d.add(const Duration(days: 7));
+      case PayCycle.every2Weeks:  return d.add(const Duration(days: 14));
+      case PayCycle.every4Weeks:  return d.add(const Duration(days: 28));
+      case PayCycle.monthly:
+        final y = d.year, m = d.month + 1;
+        final dim = _daysInMonth(y, m);
+        final day = d.day <= dim ? d.day : dim;
+        return DateTime(y, m, day);
+    }
+  }
+
+  static int _daysInMonth(int year, int month) {
+    final firstOfNext = (month == 12) ? DateTime(year + 1, 1, 1) : DateTime(year, month + 1, 1);
+    return firstOfNext.subtract(const Duration(days: 1)).day;
+  }
+
 }
 
 String encodeRecurring(List<RecurringIncome> r) =>

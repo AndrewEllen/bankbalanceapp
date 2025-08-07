@@ -1,4 +1,5 @@
-// lib/pages/recurring_income_edit_page.dart (v4)
+
+// lib/pages/recurring_income_edit_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
@@ -34,12 +35,17 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
   final _overtimeHourly = TextEditingController(); // optional overtime hourly (future use)
   double _defaultDaily = 0;
   List<DayHours> _periodDays = [];
-  final _deductions = DeductionsSettings();
+  DeductionsSettings _deductions = const DeductionsSettings();
   final _deductionsService = const DeductionsService();
   final _breakRepo = BreakRulesRepository();
 
   final _repo = RecurringIncomeRepository();
   bool _advanced = false;
+
+  // UI controllers for deductions (persist into _deductions on change)
+  final _unionMonthlyCtrl = TextEditingController();
+  final _pensionPctCtrl   = TextEditingController();
+  final _pensionCapCtrl   = TextEditingController();
 
   @override
   void initState() {
@@ -58,7 +64,15 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
         _defaultDaily = e.defaultDailyHours ?? 0;
         _periodDays = List<DayHours>.from(e.periodDays ?? []);
       }
+      if (e.deductions != null) {
+        _deductions = e.deductions!;
+      }
     }
+
+    // Seed deductions UI
+    _unionMonthlyCtrl.text = _deductions.unionMonthly == 0 ? '' : _deductions.unionMonthly.toStringAsFixed(2);
+    _pensionPctCtrl.text   = _deductions.pensionRate == 0 ? '' : (_deductions.pensionRate * 100).toStringAsFixed(2);
+    _pensionCapCtrl.text   = _deductions.pensionCap == 0 ? '' : _deductions.pensionCap.toStringAsFixed(2);
   }
 
   @override
@@ -67,6 +81,9 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
     _amount.dispose();
     _hourly.dispose();
     _overtimeHourly.dispose();
+    _unionMonthlyCtrl.dispose();
+    _pensionPctCtrl.dispose();
+    _pensionCapCtrl.dispose();
     super.dispose();
   }
 
@@ -114,10 +131,19 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
       return;
     }
 
+    // Refresh deductions from UI
+    final unionMonthly = double.tryParse(_unionMonthlyCtrl.text.trim()) ?? 0.0;
+    final pensionPct   = (double.tryParse(_pensionPctCtrl.text.trim()) ?? 0.0) / 100.0;
+    final pensionCap   = double.tryParse(_pensionCapCtrl.text.trim()) ?? 0.0;
+    _deductions = _deductions.copyWith(
+      unionMonthly: unionMonthly,
+      pensionRate: pensionPct,
+      pensionCap: pensionCap,
+    );
+
     // Sum paid hours (with break deduction) per day.
     double totalPaidHours = 0;
     for (final d in _periodDays) {
-      // Overtime cutoff handled in editor's paid calc, but we recompute here to be safe.
       final includedExtra = _isAfterOtCutoff(d.date, _firstDate) ? 0.0 : d.extraHours;
       final totalForBreaks = d.baseHours + includedExtra;
       totalPaidHours += await _paidFor(totalForBreaks);
@@ -144,6 +170,7 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
       overtimeHourly: double.tryParse(_overtimeHourly.text.trim()),
       defaultDailyHours: _defaultDaily,
       periodDays: _periodDays,
+      deductions: _deductions,
     );
     await _repo.upsert(item);
     if (mounted) Navigator.pop(context);
@@ -155,12 +182,13 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
     final week4Monday = DateTime(payday.year, payday.month, payday.day).subtract(Duration(days: diff));
     final week3Monday = week4Monday.subtract(const Duration(days: 7));
     final cutoff = week3Monday.add(const Duration(days: 2)); // Wed of W3
-    return date.isAfter(cutoff);
+    return date.isAfter(cutoff) || date.isAtSameMomentAs(cutoff);
   }
 
   @override
   Widget build(BuildContext context) {
     final df = DateFormat.yMMMEd();
+    const card = Color(0xFF1C1C1E);
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.existing == null ? 'Add Recurring Income' : 'Edit Recurring Income'),
@@ -193,7 +221,7 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
                   // Common: pay cycle + first date + enabled
                   DropdownButtonFormField<PayCycle>(
                     value: _cycle,
-                    dropdownColor: const Color(0xFF1C1C1E),
+                    dropdownColor: card,
                     style: const TextStyle(color: Colors.white),
                     decoration: const InputDecoration(
                       labelText: 'Pay Cycle',
@@ -211,7 +239,7 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
                   ),
                   const SizedBox(height: 12),
                   ListTile(
-                    tileColor: const Color(0xFF1C1C1E),
+                    tileColor: card,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: Colors.white24)),
                     title: const Text('Payment date', style: TextStyle(color: Colors.white70)),
                     subtitle: Text(df.format(_firstDate), style: const TextStyle(color: Colors.white)),
@@ -288,12 +316,15 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
                     PayPeriodEditor(
                       paymentDate: _firstDate,
                       defaultDailyHours: _defaultDaily,
+                      initialDays: _periodDays.isNotEmpty ? _periodDays : (widget.existing?.periodDays ?? const []),
                       onChanged: (days) {
-                        setState(() {
-                          _periodDays = days;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) setState(() { _periodDays = days; });
                         });
                       },
                     ),
+                    const SizedBox(height: 16),
+                    _deductionsCard(),
                   ],
                 ],
               ),
@@ -315,6 +346,77 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _deductionsCard() {
+    const card = Color(0xFF1C1C1E);
+    const border = OutlineInputBorder(borderSide: BorderSide(color: Colors.white24));
+    const pad = EdgeInsets.symmetric(horizontal: 8, vertical: 8);
+    return Card(
+      color: card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Colors.white12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Deductions', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                  width: 170,
+                  child: TextField(
+                    controller: _unionMonthlyCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Union monthly (£)',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      contentPadding: pad, enabledBorder: border, focusedBorder: border,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 140,
+                  child: TextField(
+                    controller: _pensionPctCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Pension %',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      contentPadding: pad, enabledBorder: border, focusedBorder: border,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: TextField(
+                    controller: _pensionCapCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Pension cap/month (£)',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      contentPadding: pad, enabledBorder: border, focusedBorder: border,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text('Union is a flat monthly amount. Pension is % with optional monthly cap.',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
           ],
         ),
       ),
