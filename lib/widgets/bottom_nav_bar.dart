@@ -6,20 +6,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:sensors_plus/sensors_plus.dart';
 
-const _kMaxRollDeg   = 45.0;   // stop moving after ±45°
-const _kMaxPitchDeg  = 45.0;   // fully narrow at 0°, fully wide at 45°
-const _kMinAlpha     = 0.05;
-const _kMaxAlpha     = 0.15;
-const _kMinWidthFrac = 0.15;   // band width as % of bar
-const _kMaxWidthFrac = 0.70;
-const _kSmoothing    = 14.0;    // bigger = snappier
-const _kBlurSigma     = 4.0;  // backdrop blur strength
-const _kVertRangeFrac = 0.18;  // how far the band can travel up/down
-const _kEdgeSoftness  = 8.0;   // px of Gaussian blur on the specular band
-double _vCenter = 0.5;          // smoothed Y (0 = top, 1 = bottom)
-double _tVCenter = 0.5;         // sensor-driven target
+const _kMaxRollDeg    = 45.0;   // stop moving after ±45°
+const _kMaxPitchDeg   = 45.0;   // fully narrow at 0°, fully wide at 45°
+const _kMinAlpha      = 0.1;
+const _kMaxAlpha      = 0.3;
+const _kMinWidthFrac  = 0.1;   // keep your original floor
+const _kMaxWidthFrac  = 0.70;
+const _kSmoothing     = 14.0;   // bigger = snappier
+const _kBlurSigma     = 1.0;    // backdrop blur strength
+const _kVertRangeFrac = 0.8;   // subtle vertical travel
+const _kEdgeSoftness  = 14.0;    // px of Gaussian blur on the specular band
 
+// ---- Visual-tuning constants (unchanged except one new knob) ----
+const _kNeutralPitchDeg = 40.0; // treat ~40° pitch as neutral
+const _kWidthEase       = 1.35; // >1 = gentler shrink near neutral
+const _kAlphaEase       = 1.10; // mild easing for brightness
+const _kHorizAmt        = 0.26; // horizontal wander amount
 
+// NEW: scale how much width is allowed to shrink overall (0..1, lower = less shrink)
+const _kWidthAmount     = 0.65;
+
+double _vCenter  = 0.5;   // smoothed Y (0 = top, 1 = bottom)
+double _tVCenter = 0.5;   // sensor-driven target
 
 class BottomNavBar extends StatefulWidget {
   const BottomNavBar({super.key});
@@ -37,74 +45,86 @@ class _BottomNavBarState extends State<BottomNavBar> with SingleTickerProviderSt
   late final StreamSubscription _accelSub;
   late final Ticker _ticker;
 
-  // Target values straight from sensors
+  // Targets straight from sensors
   double _tCenter = 0.5, _tWidth = _kMaxWidthFrac, _tAlpha = _kMinAlpha;
+
+  bool _isUpsideDown = false;
+  Duration? _prevTimestamp;
 
   @override
   void initState() {
     super.initState();
-
-    // Listen to accelerometer
     _accelSub = accelerometerEvents.listen(_onAccel);
-
-    // Paint at vsync to apply smoothing
     _ticker = createTicker(_tick)..start();
   }
 
-  bool _isUpsideDown = false;
-
   void _onAccel(AccelerometerEvent e) {
-    // ────────────── 1. Decide if we should flip the mapping ──────────────
-    // y > 0 means the phone’s top edge is pointing toward the floor.
-    // Only commit to the flip after |y| > 3 m/s² to avoid jitter at 90 °.
+    // 1) Flip mapping when the phone is upside-down (top edge toward floor)
     final bool newUpsideDown = e.y > 0;
     if (newUpsideDown != _isUpsideDown) {
-      if (e.y.abs() > 3.0) _isUpsideDown = newUpsideDown;
+      if (e.y.abs() > 3.0) _isUpsideDown = newUpsideDown; // commit only when clearly flipped
     }
 
-    // ────────────── 2. Normalise gravity vector ──────────────
+    // 2) Normalise gravity vector
     final double g = math.sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
-    if (g == 0) return;                    // safety
+    if (g == 0) return;
 
-    double nx = e.x / g;                   // side-to-side tilt  (-1 … +1)
-    double nz = e.z / g;                   // front-back tilt    (-1 … +1)
+    double nx = e.x / g; // left-right tilt
+    double nz = e.z / g; // front-back tilt (pitch-ish)
 
-    // ────────────── 3. Keep gestures natural when upside-down ────────────
+    // 3) Keep gestures natural when upside-down
     if (_isUpsideDown) {
-      nx = -nx;                            // invert left ↔ right
-      nz = -nz;                            // invert front ↔ back
+      nx = -nx;
+      nz = -nz;
     }
 
-    // ────────────── 4. Map to highlight targets ──────────────
-    _tCenter = 0.5 + 0.30 * nx;            // horizontal wander (±30 % of bar)
-    final nzAbs = nz.abs();
-    _tVCenter = 0.5 + _kVertRangeFrac * nz;   // vertical wander (≈20 %)
-    _tWidth   = _lerp(_kMinWidthFrac, _kMaxWidthFrac, 1 - nzAbs);
-    _tAlpha   = _lerp(_kMinAlpha,     _kMaxAlpha,     1 - nzAbs);
+    // 4) Map to highlight targets with neutral pitch handling
+    final double nzNeutral = math.sin(_kNeutralPitchDeg * math.pi / 180.0); // ~0.643 at 40°
+    final double nzAbs = nz.abs();
+
+    // tFromNeutral: 0 at |nz| == nzNeutral, 1 at |nz| == 1 (phone flat)
+    double tFromNeutral = (nzAbs - nzNeutral);
+    if (tFromNeutral < 0) tFromNeutral = 0;
+    tFromNeutral /= (1.0 - nzNeutral);
+
+    // Width: make shrink less sensitive with ease + global scale
+    final double tWidthRaw = math.pow(tFromNeutral, _kWidthEase).toDouble();
+    final double tWidth    = (tWidthRaw * _kWidthAmount).clamp(0.0, 1.0);
+
+    // Alpha: keep your current mapping
+    final double tAlpha  = math.pow(tFromNeutral, _kAlphaEase).toDouble();
+
+    // Horizontal wander (unchanged)
+    _tCenter = 0.5 + _kHorizAmt * nx;
+
+    // Vertical wander: only move past neutral, eased slightly
+    double vSigned = 0.0;
+    if (nzAbs > nzNeutral) {
+      final double vUnit = (nzAbs - nzNeutral) / (1.0 - nzNeutral); // 0..1
+      vSigned = nz.sign * math.pow(vUnit, 1.2).toDouble();
+    }
+    _tVCenter = 0.5 + _kVertRangeFrac * vSigned;
+
+    // Apply width & brightness
+    _tWidth = _lerp(_kMaxWidthFrac, _kMinWidthFrac, tWidth);
+    _tAlpha = _lerp(_kMinAlpha,     _kMaxAlpha,     tAlpha);
   }
 
-
-
-  Duration? _prevTimestamp;          // add this field to the State class
-
   void _tick(Duration timestamp) {
-    // Work out how many seconds have passed since the previous tick
     final dtSeconds = _prevTimestamp == null
-        ? 1.0 / 60.0                        // first frame → assume 60 fps
+        ? 1.0 / 60.0
         : (timestamp - _prevTimestamp!).inMicroseconds / 1e6;
     _prevTimestamp = timestamp;
 
-    // Exponential smoothing – clamp factor to [0,1] for safety
     final factor = (_kSmoothing * dtSeconds).clamp(0.0, 1.0);
 
-    _center = _lerp(_center, _tCenter, factor);
-    _width  = _lerp(_width , _tWidth , factor);
-    _alpha  = _lerp(_alpha , _tAlpha , factor);
+    _center  = _lerp(_center , _tCenter , factor);
+    _width   = _lerp(_width  , _tWidth  , factor);
+    _alpha   = _lerp(_alpha  , _tAlpha  , factor);
     _vCenter = _lerp(_vCenter, _tVCenter, factor);
 
-    if (mounted) setState(() {});   // trigger repaint
+    if (mounted) setState(() {});
   }
-
 
   static double _lerp(double a, double b, double t) => a + (b - a) * t.clamp(0.0, 1.0);
 
@@ -125,14 +145,15 @@ class _BottomNavBarState extends State<BottomNavBar> with SingleTickerProviderSt
           height: 56,
           margin: const EdgeInsets.symmetric(horizontal: 100, vertical: 8),
           decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: Color.fromRGBO(67, 67, 68, 0.8), // pick any Color
-                width: 2,           // stroke thickness
-              ),
-              boxShadow: [
-            BoxShadow(color: Colors.black26, blurRadius: 20, offset: Offset(0, 4))
-          ]),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: const Color.fromRGBO(67, 67, 68, 0.8),
+              width: 2,
+            ),
+            boxShadow: const [
+              BoxShadow(color: Colors.black26, blurRadius: 20, offset: Offset(0, 4)),
+            ],
+          ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
             child: Stack(
@@ -143,15 +164,15 @@ class _BottomNavBarState extends State<BottomNavBar> with SingleTickerProviderSt
                   filter: ImageFilter.blur(sigmaX: _kBlurSigma, sigmaY: _kBlurSigma),
                   child: const SizedBox(),
                 ),
-                // Tint (light/dark based on backdrop luminance could be added here)
+                // Subtle tint
                 Container(color: Colors.white.withOpacity(0.08)),
                 // Liquid-glass specular band
                 CustomPaint(
                   painter: _LiquidHighlightPainter(
-                    centerFrac:  disableAnims ? 0.5           : _center,
-                    verticalFrac: disableAnims ? 0.5           : _vCenter,
-                    widthFrac:   disableAnims ? _kMinWidthFrac : _width,
-                    alpha:       disableAnims ? _kMinAlpha     : _alpha,
+                    centerFrac:   disableAnims ? 0.5            : _center,
+                    verticalFrac: disableAnims ? 0.5            : _vCenter,
+                    widthFrac:    disableAnims ? _kMinWidthFrac : _width,
+                    alpha:        disableAnims ? _kMinAlpha     : _alpha,
                   ),
                 ),
                 // Nav icons
@@ -200,21 +221,22 @@ class _LiquidHighlightPainter extends CustomPainter {
     final path = Path()
       ..addRRect(RRect.fromRectAndRadius(bandRect, Radius.circular(size.height * 0.4)));
 
-    final gradient = LinearGradient(
+    final gradient = const LinearGradient(
       begin: Alignment.centerLeft,
       end: Alignment.centerRight,
-      stops: const [0.0, 0.5, 1.0],
+      stops: [0.0, 0.5, 1.0],
       colors: [
-        Colors.white.withOpacity(0.0),
-        Colors.white.withOpacity(alpha),
-        Colors.white.withOpacity(0.0),
+        Color.fromRGBO(255, 255, 255, 0.0),
+        Color.fromRGBO(255, 255, 255, 1.0),
+        Color.fromRGBO(255, 255, 255, 0.0),
       ],
     );
 
     final paint = Paint()
       ..shader     = gradient.createShader(bandRect)
       ..blendMode  = BlendMode.plus
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, _kEdgeSoftness);
+      ..color      = Colors.white.withOpacity(alpha)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, _kEdgeSoftness);
 
     canvas.drawPath(path, paint);
   }
@@ -226,7 +248,6 @@ class _LiquidHighlightPainter extends CustomPainter {
           old.widthFrac    != widthFrac    ||
           old.alpha        != alpha;
 }
-
 
 class _NavIcon extends StatelessWidget {
   const _NavIcon({required this.icon});

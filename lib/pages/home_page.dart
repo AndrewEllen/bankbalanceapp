@@ -202,17 +202,24 @@ class _HomePageState extends State<HomePage> {
             ),
 
             Positioned(
-              bottom: 60,
+              // 60dp above the *safe* bottom on every device
+              bottom: 10 + MediaQuery.of(context).padding.bottom,
               left: 0,
               right: 0,
               child: Align(
                 alignment: Alignment.center,
                 child: Transform.translate(
-                  offset: Offset(0, (1-(0.6/_sheetSize))*1000),
-                  child: BottomNavBar(),
+                  // normalize the 1000 magic number to screen height
+                  offset: Offset(
+                    0,
+                    (1 - (0.6 / _sheetSize)) *
+                        MediaQuery.of(context).size.height * 0.90, // tweak 0.90 to taste
+                  ),
+                  child: const BottomNavBar(),
                 ),
               ),
-            ),
+            )
+
 
           ],
         ),
