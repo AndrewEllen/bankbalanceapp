@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Bank Balance App',
+      title: 'MoneyMirror',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
 
