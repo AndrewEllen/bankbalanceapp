@@ -131,10 +131,13 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
     final t = widget.template;
     final df = DateFormat.yMMMd();
     final hourly = t.hourly ?? 0;
-
     return Scaffold(
+      // Dark background to match the rest of the app
+      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text('Pay period • ${t.name}'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
       ),
       body: FutureBuilder<Map<String, double>>(
         future: _recalcTotals(_inst.days),
@@ -152,9 +155,24 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text('Start: ${df.format(_inst.periodStart)}')),
-                  Expanded(child: Text('End: ${df.format(_inst.periodEnd)}')),
-                  Expanded(child: Text('Payday: ${df.format(_inst.paymentDate)}')),
+                  Expanded(
+                    child: Text(
+                      'Start: ${df.format(_inst.periodStart)}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      'End: ${df.format(_inst.periodEnd)}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      'Payday: ${df.format(_inst.paymentDate)}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -176,9 +194,19 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
                       child: TextField(
                         controller: _carryInCtrl,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
                           labelText: 'Carry‑in hours (paid)',
-                          border: OutlineInputBorder(),
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          filled: true,
+                          fillColor: const Color(0xFF2C2C2E),
+                          border: const OutlineInputBorder(),
+                          enabledBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white60),
+                          ),
                           isDense: true,
                         ),
                         onChanged: (_) => setState(() {}),
@@ -189,9 +217,19 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
                       child: TextField(
                         controller: _adjustCtrl,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
                           labelText: 'Manual adj. (hours)',
-                          border: OutlineInputBorder(),
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          filled: true,
+                          fillColor: const Color(0xFF2C2C2E),
+                          border: const OutlineInputBorder(),
+                          enabledBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white60),
+                          ),
                           isDense: true,
                         ),
                         onChanged: (_) => setState(() {}),
@@ -201,26 +239,47 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
                 ),
                 const SizedBox(height: 12),
                 Card(
+                  color: const Color(0xFF1C1C1E),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   child: Padding(
                     padding: const EdgeInsets.all(12.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Summary', style: Theme.of(context).textTheme.titleMedium),
+                        const Text(
+                          'Summary',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
                         const SizedBox(height: 8),
-                        Text('Included paid (after breaks): ${totals['paidIncluded']!.toStringAsFixed(2)} h'),
-                        Text('Carry‑out to next (paid): ${totals['carryOutPaid']!.toStringAsFixed(2)} h'),
-                        Text('Carry‑in + adj.: ${(double.tryParse(_carryInCtrl.text) ?? 0 + (double.tryParse(_adjustCtrl.text) ?? 0)).toStringAsFixed(2)} h'),
-                        const Divider(),
-                        if (hourly == 0) const Text('Set hourly on the template to see gross/net.')
-                        else ...[
-                          Text('Gross: £${ded['gross']!.toStringAsFixed(2)}'),
-                          Text('Pension: £${ded['pension']!.toStringAsFixed(2)}'),
-                          Text('Tax: £${ded['tax']!.toStringAsFixed(2)}'),
-                          Text('NI: £${ded['ni']!.toStringAsFixed(2)}'),
-                          Text('Union: £${ded['union']!.toStringAsFixed(2)}'),
+                        Text(
+                          'Included paid (after breaks): ${totals['paidIncluded']!.toStringAsFixed(2)} h',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        Text(
+                          'Carry‑out to next (paid): ${totals['carryOutPaid']!.toStringAsFixed(2)} h',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        Text(
+                          'Carry‑in + adj.: ${(double.tryParse(_carryInCtrl.text) ?? 0 + (double.tryParse(_adjustCtrl.text) ?? 0)).toStringAsFixed(2)} h',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        const Divider(color: Colors.white24),
+                        if (hourly == 0) ...[
+                          const Text(
+                            'Set hourly on the template to see gross/net.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ] else ...[
+                          Text('Gross: £${ded['gross']!.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white70)),
+                          Text('Pension: £${ded['pension']!.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white70)),
+                          Text('Tax: £${ded['tax']!.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white70)),
+                          Text('NI: £${ded['ni']!.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white70)),
+                          Text('Union: £${ded['union']!.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white70)),
                           const SizedBox(height: 4),
-                          Text('Net: £${ded['net']!.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          Text(
+                            'Net: £${ded['net']!.toStringAsFixed(2)}',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                          ),
                         ],
                       ],
                     ),
@@ -230,9 +289,19 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
                 TextField(
                   controller: _simpleAmountCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
                     labelText: 'Amount this period (£)',
-                    border: OutlineInputBorder(),
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    filled: true,
+                    fillColor: const Color(0xFF2C2C2E),
+                    border: const OutlineInputBorder(),
+                    enabledBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white60),
+                    ),
                   ),
                 ),
               ],
@@ -244,6 +313,12 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: _save,
             child: const Text('Save'),
           ),

@@ -45,8 +45,10 @@ class _PayPeriodInstancesListViewState extends State<PayPeriodInstancesListView>
 
   Future<List<_RowData>> _loadRows() async {
     final templates = await _templatesRepo.load();
+    final allInstances = await _instRepo.loadAll();
     final now = DateTime.now();
     final rows = <_RowData>[];
+    // Iterate over each enabled template and prepare rows for current and previous periods.
     for (final t in templates.where((t) => t.enabled)) {
       // Determine the next payday on or after today.
       final nextPayday = _nextOnOrAfter(t.firstPaymentDate, t.cycle, now);
@@ -58,15 +60,12 @@ class _PayPeriodInstancesListViewState extends State<PayPeriodInstancesListView>
       var inst = await _instRepo.findByTemplateAndPayment(t.id, nextPayday);
       // If not found, create one and persist. Seed days from template if available.
       if (inst == null) {
-        // Compute carry‑in hours from previous instance.
+        // Compute carry‑in hours from previous instance (if any).
         final prevPayday = _previousPayday(t.firstPaymentDate, t.cycle, nextPayday);
         final prevInst = await _instRepo.findByTemplateAndPayment(t.id, prevPayday);
         final carryIn = prevInst?.carryOutHours ?? 0.0;
-        // Build days list: copy from template if it has saved periodDays.
-        final List<pp.DayHours> days = t.periodDays
-                ?.map((e) => pp.DayHours(date: e.date, baseHours: e.baseHours, extraHours: e.extraHours))
-                .toList() ??
-            _buildDays(ps, pe);
+        // Build days list: copy from template if it has saved periodDays, otherwise create default days.
+        final List<pp.DayHours> days = t.periodDays?.map((e) => pp.DayHours(date: e.date, baseHours: e.baseHours, extraHours: e.extraHours)).toList() ?? _buildDays(ps, pe);
         inst = PayPeriodInstance(
           id: const Uuid().v4(),
           templateId: t.id,
@@ -83,55 +82,78 @@ class _PayPeriodInstancesListViewState extends State<PayPeriodInstancesListView>
         );
         await _instRepo.upsert(inst);
       }
-      // Compute display amount and update carryOutHours if needed.
-      String amountLabel;
-      double newCarryOut = 0;
-      if (t.advanced && (t.hourly ?? 0) > 0) {
-        // Calculate paid hours per day after breaks and cut‑off.
-        double dayPaidIncluded = 0.0;
-        double carryOutPaid = 0.0;
-        for (final d in inst.days) {
-          final baseOnly = await _paidHoursAfterBreaks(d.baseHours);
-          final withExtra = await _paidHoursAfterBreaks(d.baseHours + d.extraHours);
-          final extraPaidPortion = (withExtra - baseOnly).clamp(0, double.infinity);
-          if (_isAfterOtCutoff(d.date, inst.paymentDate)) {
-            // Extra after cutoff carries to next period.
-            carryOutPaid += extraPaidPortion;
-            dayPaidIncluded += baseOnly;
-          } else {
-            dayPaidIncluded += withExtra;
+
+      // Helper to compute amount label, numeric value and carry-out for a given instance.
+      Future<Map<String, dynamic>> computeAmount(PayPeriodInstance instance) async {
+        if (t.advanced && (t.hourly ?? 0) > 0) {
+          double dayPaidIncluded = 0.0;
+          double carryOutPaid = 0.0;
+          for (final d in instance.days) {
+            final baseOnly = await _paidHoursAfterBreaks(d.baseHours);
+            final withExtra = await _paidHoursAfterBreaks(d.baseHours + d.extraHours);
+            final extraPaidPortion = (withExtra - baseOnly).clamp(0, double.infinity);
+            if (_isAfterOtCutoff(d.date, instance.paymentDate)) {
+              carryOutPaid += extraPaidPortion;
+              dayPaidIncluded += baseOnly;
+            } else {
+              dayPaidIncluded += withExtra;
+            }
           }
-        }
-        final totalPaid = dayPaidIncluded + inst.carryInHours + inst.manualAdjustment;
-        final hourlyRate = t.hourly ?? 0;
-        final gross = totalPaid * hourlyRate;
-        if (hourlyRate == 0) {
-          amountLabel = '—';
-        } else if (t.deductions != null) {
-          final ded = _deductionsService.computeNetForPeriod(
-            periodGross: gross,
-            periodsPerYear: t.cycle.periodsPerYear,
-            s: t.deductions!,
-          );
-          final net = ded['net'] ?? gross;
-          amountLabel = '£${net.toStringAsFixed(2)}';
+          final totalPaid = dayPaidIncluded + instance.carryInHours + instance.manualAdjustment;
+          final hourlyRate = t.hourly ?? 0;
+          final gross = totalPaid * hourlyRate;
+          double amountValue;
+          String amountLabel;
+          if (hourlyRate == 0) {
+            amountValue = 0;
+            amountLabel = '—';
+          } else if (t.deductions != null) {
+            final ded = _deductionsService.computeNetForPeriod(
+              periodGross: gross,
+              periodsPerYear: t.cycle.periodsPerYear,
+              s: t.deductions!,
+            );
+            final net = ded['net'] ?? gross;
+            amountValue = net;
+            amountLabel = '£${net.toStringAsFixed(2)}';
+          } else {
+            amountValue = gross;
+            amountLabel = '£${gross.toStringAsFixed(2)}';
+          }
+          return {
+            'amountValue': amountValue,
+            'amountLabel': amountLabel,
+            'carryOutPaid': carryOutPaid,
+          };
         } else {
-          amountLabel = '£${gross.toStringAsFixed(2)}';
+          // Simple template – use override if present otherwise use template amount.
+          final amt = instance.simpleOverrideAmount ?? t.amount;
+          final value = amt;
+          final label = amt > 0 ? '£${amt.toStringAsFixed(2)}' : '—';
+          return {
+            'amountValue': value,
+            'amountLabel': label,
+            'carryOutPaid': 0.0,
+          };
         }
-        newCarryOut = carryOutPaid;
-      } else {
-        // Simple template.
-        final amount = inst.simpleOverrideAmount ?? t.amount;
-        amountLabel = amount > 0 ? '£${amount.toStringAsFixed(2)}' : '—';
       }
-      // Update carryOutHours on instance if it changed.
+
+      // Compute display amount for current instance and update carryOut if needed.
+      final currentAmounts = await computeAmount(inst);
+      final double newCarryOut = currentAmounts['carryOutPaid'];
       if (newCarryOut != inst.carryOutHours) {
         inst = inst.copyWith(carryOutHours: newCarryOut);
         await _instRepo.upsert(inst);
       }
-      rows.add(_RowData(t, inst, amountLabel));
+      rows.add(_RowData(t, inst, currentAmounts['amountLabel'] as String, currentAmounts['amountValue'] as double));
+
+      // Include previous pay periods for this template.
+      for (final prevInst in allInstances.where((pp) => pp.templateId == t.id && pp.paymentDate.isBefore(now))) {
+        final prevAmounts = await computeAmount(prevInst);
+        rows.add(_RowData(t, prevInst, prevAmounts['amountLabel'] as String, prevAmounts['amountValue'] as double));
+      }
     }
-    // Sort by payment date ascending.
+    // Sort by payment date ascending so upcoming periods come after older ones when needed.
     rows.sort((a, b) => a.instance.paymentDate.compareTo(b.instance.paymentDate));
     return rows;
   }
@@ -275,53 +297,134 @@ class _PayPeriodInstancesListViewState extends State<PayPeriodInstancesListView>
       future: _futureRows,
       builder: (context, snap) {
         if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: CircularProgressIndicator(color: Colors.white));
         }
         final rows = snap.data!;
         if (rows.isEmpty) {
-          return const Center(child: Text('No templates enabled.', style: TextStyle(color: Colors.white70)));
+          return const Center(
+            child: Text(
+              'No templates enabled.',
+              style: TextStyle(color: Colors.white70),
+            ),
+          );
+        }
+        // Partition rows into upcoming and previous based on payment date.
+        final now = DateTime.now();
+        final upcoming = <_RowData>[];
+        final previous = <_RowData>[];
+        for (final r in rows) {
+          if (r.instance.paymentDate.isBefore(now)) {
+            previous.add(r);
+          } else {
+            upcoming.add(r);
+          }
+        }
+        // Compute total expected income for upcoming periods within the next 30 days.
+        final cutoff = now.add(const Duration(days: 30));
+        double totalNext30 = 0.0;
+        for (final r in upcoming) {
+          if (!r.instance.paymentDate.isAfter(cutoff)) {
+            totalNext30 += r.amountValue;
+          }
         }
         return RefreshIndicator(
           onRefresh: () async {
             await _reload();
           },
-          child: ListView.builder(
-            itemCount: rows.length,
-            itemBuilder: (context, i) {
-              final r = rows[i];
-              final t = r.template;
-              final inst = r.instance;
-              return Card(
-                color: const Color(0xFF1C1C1E),
-                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: ListTile(
-                  title: Text(
-                    t.name,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          child: ListView(
+            children: [
+              if (upcoming.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    'Upcoming pay periods',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                  subtitle: Text(
-                    'Period ${df.format(inst.periodStart)} – ${df.format(inst.periodEnd)}  •  Payday ${df.format(inst.paymentDate)}',
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    'Next 30 days total: £${totalNext30.toStringAsFixed(2)}',
                     style: const TextStyle(color: Colors.white70),
                   ),
-                  trailing: Text(
-                    r.amountLabel,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                  ),
-                  onTap: () async {
-                    final res = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PayPeriodInstanceEditPage(template: t, instance: inst),
-                      ),
-                    );
-                    if (res != null && mounted) {
-                      await _reload();
-                    }
-                  },
                 ),
-              );
-            },
+                for (final r in upcoming) ...[
+                  Card(
+                    color: const Color(0xFF1C1C1E),
+                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      title: Text(
+                        r.template.name,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        'Period ${df.format(r.instance.periodStart)} – ${df.format(r.instance.periodEnd)}  •  Payday ${df.format(r.instance.paymentDate)}',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      trailing: Text(
+                        r.amountLabel,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                      onTap: () async {
+                        final res = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PayPeriodInstanceEditPage(template: r.template, instance: r.instance),
+                          ),
+                        );
+                        if (res != null && mounted) {
+                          await _reload();
+                        }
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+              ],
+              if (previous.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    'Previous pay periods',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+                for (final r in previous.reversed) ...[
+                  Card(
+                    color: const Color(0xFF1C1C1E),
+                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      title: Text(
+                        r.template.name,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        'Period ${df.format(r.instance.periodStart)} – ${df.format(r.instance.periodEnd)}  •  Payday ${df.format(r.instance.paymentDate)}',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      trailing: Text(
+                        r.amountLabel,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                      onTap: () async {
+                        final res = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PayPeriodInstanceEditPage(template: r.template, instance: r.instance),
+                          ),
+                        );
+                        if (res != null && mounted) {
+                          await _reload();
+                        }
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+              ],
+            ],
           ),
         );
       },
@@ -335,5 +438,7 @@ class _RowData {
   final RecurringIncome template;
   final PayPeriodInstance instance;
   final String amountLabel;
-  _RowData(this.template, this.instance, this.amountLabel);
+  /// Numeric representation of the amount used for summing expected income.
+  final double amountValue;
+  _RowData(this.template, this.instance, this.amountLabel, this.amountValue);
 }
