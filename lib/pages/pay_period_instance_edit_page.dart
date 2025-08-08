@@ -113,10 +113,14 @@ class _PayPeriodInstanceEditPageState extends State<PayPeriodInstanceEditPage> {
       return;
     }
 
+    // For advanced templates, compute carry‑out hours before saving.
+    final totals = await _recalcTotals(_inst.days);
+    final carryOutPaid = totals['carryOutPaid'] ?? 0.0;
     final updated = _inst.copyWith(
       carryInHours: double.tryParse(_carryInCtrl.text.trim()) ?? 0.0,
       manualAdjustment: double.tryParse(_adjustCtrl.text.trim()) ?? 0.0,
       days: _inst.days,
+      carryOutHours: carryOutPaid,
     );
     await _repo.upsert(updated);
     if (mounted) Navigator.pop(context, {'saved': true});

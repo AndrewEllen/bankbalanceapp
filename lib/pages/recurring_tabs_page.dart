@@ -1,8 +1,8 @@
 
 import 'package:flutter/material.dart';
-import 'recurring_income_list_page.dart';
+import 'recurring_income_list_view.dart';
 import 'recurring_income_edit_page.dart';
-import 'pay_period_instance_list_page.dart';
+import 'pay_period_instances_list_view.dart';
 
 class RecurringTabsPage extends StatelessWidget {
   const RecurringTabsPage({super.key});
@@ -25,18 +25,20 @@ class RecurringTabsPage extends StatelessWidget {
                     )
                   : null,
         appBar: AppBar(
-          title: const Text('Recurring & Pay Periods'),
+          title: const Text('Pay'),
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
           bottom: const TabBar(
             tabs: [
-              Tab(text: 'Pay periods'),
-              Tab(text: 'Templates'),
+              Tab(icon: Icon(Icons.view_week), text: 'Pay periods'),
+              Tab(icon: Icon(Icons.repeat), text: 'Templates'),
             ],
           ),
         ),
         body: const TabBarView(
           children: [
-            PayPeriodInstanceListPage(),
-            RecurringIncomeListPage(),
+            PayPeriodInstancesListView(),
+            RecurringIncomeListView(),
           ],
         ),
           );

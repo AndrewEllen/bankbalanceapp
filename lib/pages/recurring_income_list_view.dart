@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
-import '../repositories/recurring_income_repository.dart';
-import '../models/recurring_income.dart';
-import '../models/recurring_income_copy.dart';
-import 'recurring_income_edit_page.dart';
+import 'package:intl/intl.dart';
 
-/// BODY-ONLY view that can be embedded under a TabBarView.
+import '../models/recurring_income.dart';
+import '../repositories/recurring_income_repository.dart';
+import 'recurring_income_edit_page.dart';
+import '../extensions/recurring_extensions.dart';
+
+/// Body‑only widget that lists all recurring income templates. This view does
+/// not include its own [Scaffold] or [AppBar]; it is intended to be placed
+/// inside a larger page (e.g. a tab). The styling, colours and behaviour
+/// mirror the original `RecurringIncomeListPage` but without the wrapper.
 class RecurringIncomeListView extends StatefulWidget {
   const RecurringIncomeListView({super.key});
 
@@ -14,113 +19,96 @@ class RecurringIncomeListView extends StatefulWidget {
 
 class _RecurringIncomeListViewState extends State<RecurringIncomeListView> {
   final _repo = RecurringIncomeRepository();
-  late Future<List<RecurringIncome>> _future;
+  List<RecurringIncome> _items = [];
 
   @override
   void initState() {
     super.initState();
-    _future = _repo.load();
+    _load();
   }
 
-  Future<void> _refresh() async {
+  Future<void> _load() async {
     final list = await _repo.load();
-    if (!mounted) return;
-    setState(() { _future = Future.value(list); });
+    if (mounted) {
+      setState(() => _items = list);
+    }
   }
 
-  Future<void> _delete(RecurringIncome it) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete template?'),
-        content: Text('Delete "${it.name}"? This does not remove any existing pay periods already created.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-        ],
-      ),
-    ) ?? false;
-    if (!ok) return;
-    await _repo.remove(it.id);
-    await _refresh();
+  Future<void> _toggleEnabled(RecurringIncome item, bool value) async {
+    // Use the extension copyWith to update the enabled flag.
+    final updated = item.copyWith(enabled: value);
+    await _repo.upsert(updated);
+    await _load();
+  }
+
+  Future<void> _deleteItem(RecurringIncome item) async {
+    await _repo.remove(item.id);
+    await _load();
+  }
+
+  String _cycleLabel(PayCycle c) {
+    switch (c) {
+      case PayCycle.everyWeek:
+        return 'Every week';
+      case PayCycle.every2Weeks:
+        return 'Every 2 weeks';
+      case PayCycle.every4Weeks:
+        return 'Every 4 weeks';
+      case PayCycle.monthly:
+        return 'Monthly';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<RecurringIncome>>(
-      future: _future,
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final items = snap.data ?? const [];
-        if (items.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('No templates yet. Tap + to add one.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: () async {
-                    await Navigator.push(context, MaterialPageRoute(builder: (_) => const RecurringIncomeEditPage()));
-                    _refresh();
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('New template'),
-                ),
-              ],
+    final df = DateFormat.yMMMEd();
+    // Surround in RefreshIndicator for pull‑to‑refresh behaviour.
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(12),
+        itemCount: _items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (context, i) {
+          final it = _items[i];
+          final next = it.nextPaymentAfter(DateTime.now());
+          return Card(
+            color: const Color(0xFF1C1C1E),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              title: Text(
+                it.name,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text(
+                '${_cycleLabel(it.cycle)} • Next: ${df.format(next ?? DateTime.now())}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    value: it.enabled,
+                    onChanged: (val) => _toggleEnabled(it, val),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.white70),
+                    tooltip: 'Delete',
+                    onPressed: () => _deleteItem(it),
+                  ),
+                ],
+              ),
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => RecurringIncomeEditPage(existing: it)),
+                );
+                await _load();
+              },
             ),
           );
-        }
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, i) {
-              final it = items[i];
-              return Dismissible(
-                key: ValueKey(it.id),
-                direction: DismissDirection.endToStart,
-                confirmDismiss: (_) async {
-                  await _delete(it);
-                  return false; // we call refresh manually
-                },
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  color: Colors.redAccent,
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                child: Card(
-                  color: const Color(0xFF1C1C1E),
-                  child: ListTile(
-                    title: Text(it.name, style: const TextStyle(color: Colors.white)),
-                    subtitle: Text(
-                      it.advanced ? 'Advanced • ${it.cycle.name}' : 'Simple • ${it.cycle.name}',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    trailing: Switch(
-                      value: it.enabled,
-                      onChanged: (v) async {
-                        final updated = it.copyWith(enabled: v);
-                        await _repo.upsert(updated);
-                        _refresh();
-                      },
-                    ),
-                    onTap: () async {
-                      await Navigator.push(context, MaterialPageRoute(builder: (_) => RecurringIncomeEditPage(existing: it)));
-                      _refresh();
-                    },
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      },
+        },
+      ),
     );
   }
 }

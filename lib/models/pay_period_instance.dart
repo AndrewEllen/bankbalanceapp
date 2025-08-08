@@ -22,6 +22,17 @@ class PayPeriodInstance {
   /// For simple templates: an ad-hoc override amount (£) for this instance only.
   final double? simpleOverrideAmount;
 
+  /// Paid hours carried out to the next period (AFTER breaks). This value is
+  /// computed when editing a pay period and is used to seed the carry‑in
+  /// hours of the subsequent period. In the UI this field is read‑only.
+  final double carryOutHours;
+
+  /// Whether this pay period has been closed/finalised. A closed period
+  /// should no longer be editable and will be treated as final. Currently
+  /// there is no UI for closing a period so this defaults to `false` and
+  /// can be ignored.
+  final bool closed;
+
   PayPeriodInstance({
     required this.id,
     required this.templateId,
@@ -33,6 +44,8 @@ class PayPeriodInstance {
     this.carryInHours = 0.0,
     this.manualAdjustment = 0.0,
     this.simpleOverrideAmount,
+    this.carryOutHours = 0.0,
+    this.closed = false,
   });
 
 
@@ -47,6 +60,8 @@ class PayPeriodInstance {
     double? carryInHours,
     double? manualAdjustment,
     double? simpleOverrideAmount,
+    double? carryOutHours,
+    bool? closed,
   }) {
     return PayPeriodInstance(
       id: id ?? this.id,
@@ -59,6 +74,8 @@ class PayPeriodInstance {
       carryInHours: carryInHours ?? this.carryInHours,
       manualAdjustment: manualAdjustment ?? this.manualAdjustment,
       simpleOverrideAmount: simpleOverrideAmount ?? this.simpleOverrideAmount,
+      carryOutHours: carryOutHours ?? this.carryOutHours,
+      closed: closed ?? this.closed,
     );
   }
 
@@ -79,6 +96,8 @@ class PayPeriodInstance {
         'carryInHours': carryInHours,
         'manualAdjustment': manualAdjustment,
         'simpleOverrideAmount': simpleOverrideAmount,
+    'carryOutHours': carryOutHours,
+    'closed': closed,
       };
 
   static PayPeriodInstance fromJson(Map<String, dynamic> j) {
@@ -103,6 +122,8 @@ class PayPeriodInstance {
       carryInHours: (j['carryInHours'] as num?)?.toDouble() ?? 0.0,
       manualAdjustment: (j['manualAdjustment'] as num?)?.toDouble() ?? 0.0,
       simpleOverrideAmount: (j['simpleOverrideAmount'] as num?)?.toDouble(),
+      carryOutHours: (j['carryOutHours'] as num?)?.toDouble() ?? 0.0,
+      closed: j['closed'] as bool? ?? false,
     );
   }
 }

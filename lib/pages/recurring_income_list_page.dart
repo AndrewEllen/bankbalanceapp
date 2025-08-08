@@ -1,4 +1,3 @@
-import 'recurring_tabs_page.dart';
 // lib/pages/recurring_income_list_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -45,7 +44,6 @@ class _RecurringIncomeListPageState extends State<RecurringIncomeListPage> {
         title: const Text('Recurring Income'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-          actions: [IconButton(icon: Icon(Icons.view_week), onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (_)=> const RecurringTabsPage())); })]
       ),
       backgroundColor: Colors.black,
       floatingActionButton: FloatingActionButton.extended(
@@ -71,7 +69,7 @@ class _RecurringIncomeListPageState extends State<RecurringIncomeListPage> {
               child: ListTile(
                 title: Text(it.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 subtitle: Text(
-                  '${_cycleLabel(it.cycle)} • Next: ${df.format(next ?? DateTime.now())}',
+                  '${_cycleLabel(it.cycle)} • Next: ${df.format(next!)}',
                   style: const TextStyle(color: Colors.white70),
                 ),
                 trailing: Text('£${it.amount.toStringAsFixed(2)}',
