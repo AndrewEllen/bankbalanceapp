@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-class MainBalanceIndicator extends StatefulWidget {
-  const MainBalanceIndicator({super.key, required this.refreshing});
+class MainBalanceIndicator extends StatelessWidget {
+  const MainBalanceIndicator({super.key, required this.refreshing, required this.balance});
+
+  /// Whether the list is refreshing. When true the progress indicator
+  /// animates indeterminately.
   final bool refreshing;
 
-  @override
-  State<MainBalanceIndicator> createState() => _MainBalanceIndicatorState();
-}
-
-class _MainBalanceIndicatorState extends State<MainBalanceIndicator> {
-  final double balance = 1256.12;
+  /// The current balance to display. The caller is responsible for computing
+  /// this value (manual balance plus incomes minus expenses). It will be
+  /// formatted with two decimal places and a pound symbol.
+  final double balance;
 
   @override
   Widget build(BuildContext context) {
-
-    double scale = MediaQuery.of(context).size.height;
-
+    final scale = MediaQuery.of(context).size.height;
+    final formatted = '£' + balance.toStringAsFixed(2);
     return Center(
       child: SizedBox(
         width: scale / 3.3333,
@@ -24,7 +24,6 @@ class _MainBalanceIndicatorState extends State<MainBalanceIndicator> {
         child: Stack(
           alignment: Alignment.center,
           children: [
-
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: SizedBox(
@@ -32,53 +31,48 @@ class _MainBalanceIndicatorState extends State<MainBalanceIndicator> {
                 width: 320,
                 child: CircularProgressIndicator(
                   color: Colors.white,
-                  value: widget.refreshing ? null : 1,
+                  value: refreshing ? null : 1,
                 ),
               ),
             ),
-
             Positioned(
               bottom: -10,
               child: Container(
                 height: 75,
                 width: 200,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.black,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black, // strong shadow
-                      blurRadius: 20,                        // soft edges
-                      spreadRadius: 25,                      // large area
+                      color: Colors.black,
+                      blurRadius: 20,
+                      spreadRadius: 25,
                     ),
                   ],
                 ),
               ),
             ),
-
-
-            Positioned(
+            const Positioned(
               bottom: 10,
               child: Text(
-                "Balance",
+                'Balance',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
-                  fontSize: 24
+                  fontSize: 24,
                 ),
               ),
             ),
-
             Center(
               child: Text(
-                "£1,256.12",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 36
+                formatted,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 36,
                 ),
               ),
             ),
-
           ],
         ),
       ),

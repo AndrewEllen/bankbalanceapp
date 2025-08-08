@@ -192,9 +192,15 @@ class _BottomNavBarState extends State<BottomNavBar> with SingleTickerProviderSt
                       },
                     ),
                     _NavIcon(
-                      icon: Icons.person,
+                      icon: Icons.receipt_long,
                       onPressed: () {
-                        Navigator.pushNamed(context, '/break-rules');
+                        Navigator.pushNamed(context, '/expenses');
+                      },
+                    ),
+                    _NavIcon(
+                      icon: Icons.settings,
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/settings');
                       },
                     ),
                   ],

@@ -417,6 +417,19 @@ class _RecurringIncomeEditPageState extends State<RecurringIncomeEditPage> {
             const SizedBox(height: 8),
             const Text('Union is a flat monthly amount. Pension is % with optional monthly cap.',
                 style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const SizedBox(height: 16),
+            // Button to open the global break rules editor. This allows users to
+            // adjust break calculation settings while editing a template.
+            TextButton.icon(
+              onPressed: () async {
+                await Navigator.pushNamed(context, '/break-rules');
+              },
+              icon: const Icon(Icons.timer_off, color: Colors.deepPurple),
+              label: const Text(
+                'Edit Break Rules',
+                style: TextStyle(color: Colors.deepPurple),
+              ),
+            ),
           ],
         ),
       ),
