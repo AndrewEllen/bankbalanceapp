@@ -3,6 +3,7 @@ import 'dart:math';
 import '../widgets/bottom_nav_bar.dart';
 import '../widgets/main_balance_indicator.dart';
 import '../widgets/transaction_box.dart';
+import 'package:flutter/cupertino.dart';
 import '../repositories/recurring_income_repository.dart';
 import '../repositories/pay_period_instance_repository.dart';
 import '../repositories/recurring_expense_repository.dart';
@@ -113,7 +114,7 @@ class _HomePageState extends State<HomePage> {
         }
       } else {
         // upcoming; include only those within next 30 days for the upcoming summary.
-        if (inst.paymentDate.difference(now).inDays <= 30) {
+        if (inst.paymentDate.difference(now).inDays <= 21) {
           upcomingIncomeSum += amount;
         }
       }
@@ -134,7 +135,7 @@ class _HomePageState extends State<HomePage> {
         next = _addCycle(next, e.cycle);
       }
       // Now next is on or after now. Accumulate upcoming payments up to 30 days.
-      while (next.isAfter(now) && next.difference(now).inDays <= 30) {
+      while (next.isAfter(now) && next.difference(now).inDays <= 21) {
         upcomingExpenseSum += e.amount;
         next = _addCycle(next, e.cycle);
       }
@@ -203,14 +204,58 @@ class _HomePageState extends State<HomePage> {
     }
     // Sort by date descending (most recent first)
     records.sort((a, b) => b.model.transactionTime.compareTo(a.model.transactionTime));
-    // Append a widget for each record. Use TransactionItem for incomes; for expenses attach edit/delete.
+    // Append a widget for each transaction record. All transactions (income or expense)
+    // share the same visual style provided by TransactionItem. When the record
+    // originates from a one-off expense we wrap the item in a long‑press handler
+    // that presents edit/delete options.
     int transIndex = 0;
     for (final rec in records) {
-      if (rec.expense != null) {
-        items.add(_buildExpenseItem(rec.expense!));
-      } else {
-        items.add(TransactionItem(index: transIndex++, model: rec.model));
+      final model = rec.model;
+      final expense = rec.expense;
+      Widget tile = TransactionItem(index: transIndex++, model: model);
+      if (expense != null) {
+        tile = GestureDetector(
+          onLongPress: () async {
+            // Present options to edit or delete this expense.
+            await showModalBottomSheet(
+              context: context,
+              backgroundColor: Colors.black,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              builder: (context) {
+                return SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.edit, color: Colors.white70),
+                        title: const Text('Edit', style: TextStyle(color: Colors.white)),
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await _showEditExpenseDialog(expense);
+                          await _loadFinancialData();
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.delete, color: Colors.white70),
+                        title: const Text('Delete', style: TextStyle(color: Colors.white)),
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await _expRepo.delete(expense.id);
+                          await _loadFinancialData();
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+          child: tile,
+        );
       }
+      items.add(tile);
     }
     if (mounted) {
       setState(() {
@@ -449,7 +494,8 @@ class _HomePageState extends State<HomePage> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: const [
             Text(
-              'Log expense',
+              // Use a more descriptive label because this button logs both incomes and expenses.
+              'Add transaction',
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
             ),
             Icon(Icons.add, color: Colors.white),
@@ -502,26 +548,35 @@ class _HomePageState extends State<HomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Log Transaction',
+                      'Add Transaction',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
                     ),
                     const SizedBox(height: 12),
                     // Type selector: expense vs income
-                    Row(
-                      children: [
-                        const Text('Income', style: TextStyle(color: Colors.white70)),
-                        const SizedBox(width: 12),
-                        Switch(
-                          value: isIncome,
-                          onChanged: (val) {
-                            setModalState(() {
-                              isIncome = val;
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        Text(isIncome ? 'Income' : 'Expense', style: const TextStyle(color: Colors.white)),
-                      ],
+                    // Transaction type selector: expense vs income. Using a segmented control
+                    // improves clarity because both options are always visible.
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: CupertinoSlidingSegmentedControl<bool>(
+                        backgroundColor: Colors.grey[800]!,
+                        groupValue: isIncome,
+                        thumbColor: Color.fromRGBO(102, 58, 183, 1.0),
+                        children: const {
+                          false: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            child: Text('Expense', style: TextStyle(color: Colors.white)),
+                          ),
+                          true: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            child: Text('Income', style: TextStyle(color: Colors.white)),
+                          ),
+                        },
+                        onValueChanged: (val) {
+                          setModalState(() {
+                            isIncome = val ?? false;
+                          });
+                        },
+                      ),
                     ),
                     const SizedBox(height: 12),
                     // Category selector
@@ -657,7 +712,7 @@ class _HomePageState extends State<HomePage> {
                             await _loadFinancialData();
                           },
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
-                          child: const Text('Save'),
+                          child: const Text('Save', style: TextStyle(color: Colors.white),),
                         ),
                       ],
                     ),
@@ -720,21 +775,28 @@ class _HomePageState extends State<HomePage> {
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
                     ),
                     const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Text('Income', style: TextStyle(color: Colors.white70)),
-                        const SizedBox(width: 12),
-                        Switch(
-                          value: isIncome,
-                          onChanged: (val) {
-                            setModalState(() {
-                              isIncome = val;
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        Text(isIncome ? 'Income' : 'Expense', style: const TextStyle(color: Colors.white)),
-                      ],
+                    // Transaction type selector: expense vs income. Using a segmented control improves clarity.
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: CupertinoSlidingSegmentedControl<bool>(
+                        backgroundColor: Colors.grey[800]!,
+                        groupValue: isIncome,
+                        children: const {
+                          false: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            child: Text('Expense', style: TextStyle(color: Colors.white)),
+                          ),
+                          true: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            child: Text('Income', style: TextStyle(color: Colors.white)),
+                          ),
+                        },
+                        onValueChanged: (val) {
+                          setModalState(() {
+                            isIncome = val ?? false;
+                          });
+                        },
+                      ),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -952,9 +1014,27 @@ class _HomePageState extends State<HomePage> {
                       // Actual scrollable list with additional finance items
                       ListView.builder(
                         controller: scrollController,
-                        itemCount: _financeItems.length,
+                        // When refreshing, display shimmer placeholders for transaction items while
+                        // retaining the first two summary and action rows. Otherwise show the
+                        // computed finance items list.
+                        itemCount: _refreshing
+                            ? (_financeItems.isNotEmpty
+                                ? _financeItems.length
+                                : 6)
+                            : _financeItems.length,
                         padding: const EdgeInsets.all(16),
                         itemBuilder: (context, index) {
+                          // Always show the existing summary and add transaction rows (index 0 and 1)
+                          // regardless of refresh state.
+                          if (index < 2 && _financeItems.isNotEmpty) {
+                            return _financeItems[index];
+                          }
+                          // If refreshing and the item represents a transaction, render a shimmer placeholder
+                          if (_refreshing) {
+                            // Use the TransactionItem loading state to display shimmer effect.
+                            return TransactionItem(index: index, loading: true);
+                          }
+                          // Otherwise, return the actual finance item.
                           return _financeItems[index];
                         },
                       ),

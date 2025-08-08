@@ -202,7 +202,7 @@ class _RecurringExpenseEditPageState extends State<RecurringExpenseEditPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.deepPurple,
                   ),
-                  child: const Text('Save'),
+                  child: const Text('Save', style: TextStyle(color: Colors.white)),
                 ),
               ),
             ],
