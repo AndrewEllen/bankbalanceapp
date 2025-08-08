@@ -12,37 +12,52 @@ class RecurringTabsPage extends StatelessWidget {
     return DefaultTabController(
       length: 2,
       child: Builder(
-          builder: (context) {
-            final tabController = DefaultTabController.of(context);
-            return Scaffold(
-              floatingActionButton: tabController?.index == 1
-                  ? FloatingActionButton.extended(
-                      onPressed: () async {
-                        await Navigator.push(context, MaterialPageRoute(builder: (_) => const RecurringIncomeEditPage()));
-                        // Optionally trigger reload logic if needed
-                      },
-                      label: const Text('Add Income'),
-                    )
-                  : null,
-        appBar: AppBar(
-          title: const Text('Pay'),
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          bottom: const TabBar(
-            tabs: [
-              Tab(icon: Icon(Icons.view_week), text: 'Pay periods'),
-              Tab(icon: Icon(Icons.repeat), text: 'Templates'),
-            ],
-          ),
-        ),
-        body: const TabBarView(
-          children: [
-            PayPeriodInstancesListView(),
-            RecurringIncomeListView(),
-          ],
-        ),
+        builder: (context) {
+          final controller = DefaultTabController.of(context);
+          // Use an AnimatedBuilder so that changing tabs triggers a rebuild of
+          // the floating action button visibility.
+          return AnimatedBuilder(
+            animation: controller!,
+            builder: (context, _) {
+              final index = controller.index;
+              return Scaffold(
+                backgroundColor: Colors.black,
+                floatingActionButton: index == 1
+                    ? FloatingActionButton.extended(
+                        onPressed: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RecurringIncomeEditPage(),
+                            ),
+                          );
+                          // Optionally trigger reload logic if needed
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add Template'),
+                      )
+                    : null,
+                appBar: AppBar(
+                  title: const Text('Pay'),
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                  bottom: const TabBar(
+                    tabs: [
+                      Tab(icon: Icon(Icons.view_week), text: 'Pay periods'),
+                      Tab(icon: Icon(Icons.repeat), text: 'Templates'),
+                    ],
+                  ),
+                ),
+                body: const TabBarView(
+                  children: [
+                    PayPeriodInstancesListView(),
+                    RecurringIncomeListView(),
+                  ],
+                ),
+              );
+            },
           );
-        }
+        },
       ),
     );
   }

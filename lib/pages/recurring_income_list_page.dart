@@ -69,7 +69,7 @@ class _RecurringIncomeListPageState extends State<RecurringIncomeListPage> {
               child: ListTile(
                 title: Text(it.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 subtitle: Text(
-                  '${_cycleLabel(it.cycle)} • Next: ${df.format(next!)}',
+                  '${_cycleLabel(it.cycle)} • Next: ${df.format(next ?? DateTime.now())}',
                   style: const TextStyle(color: Colors.white70),
                 ),
                 trailing: Text('£${it.amount.toStringAsFixed(2)}',

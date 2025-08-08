@@ -133,30 +133,57 @@ class _PayPeriodInstanceListPageState extends State<PayPeriodInstanceListPage> {
   Widget build(BuildContext context) {
     final df = DateFormat.yMMMd();
     return Scaffold(
-      appBar: AppBar(title: const Text('Pay periods')),
+      // Darken the background to match the rest of the application
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text('Pay periods'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+      ),
       body: FutureBuilder<List<_Row>>(
         future: _load(),
         builder: (context, snap) {
           if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator(color: Colors.white));
           }
           final rows = snap.data!;
-          if (rows.isEmpty) return const Center(child: Text('No templates enabled.'));
+          if (rows.isEmpty) {
+            return const Center(
+              child: Text(
+                'No templates enabled.',
+                style: TextStyle(color: Colors.white70),
+              ),
+            );
+          }
           return ListView.builder(
             itemCount: rows.length,
             itemBuilder: (context, i) {
               final r = rows[i];
               return Card(
+                color: const Color(0xFF1C1C1E),
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 child: ListTile(
-                  title: Text(r.template.name),
-                  subtitle: Text('Period ${df.format(r.instance.periodStart)} – ${df.format(r.instance.periodEnd)}  •  Payday ${df.format(r.instance.paymentDate)}'),
-                  trailing: const Icon(Icons.chevron_right),
+                  title: Text(
+                    r.template.name,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    'Period ${df.format(r.instance.periodStart)} – ${df.format(r.instance.periodEnd)}  •  Payday ${df.format(r.instance.paymentDate)}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.white70),
                   onTap: () async {
-                    await Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => PayPeriodInstanceEditPage(template: r.template, instance: r.instance),
-                    ));
-                    setState(() {});
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PayPeriodInstanceEditPage(
+                          template: r.template,
+                          instance: r.instance,
+                        ),
+                      ),
+                    );
+                    if (mounted) setState(() {});
                   },
                 ),
               );

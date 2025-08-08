@@ -71,7 +71,19 @@ class _RecurringIncomeListViewState extends State<RecurringIncomeListView> {
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (context, i) {
           final it = _items[i];
-          final next = it.nextPaymentAfter(DateTime.now());
+          // Determine the subtitle depending on whether the template is enabled.
+          String subtitleText;
+          if (!it.enabled) {
+            // Disabled templates show a disabled status instead of a next date.
+            subtitleText = '${_cycleLabel(it.cycle)} • Disabled';
+          } else {
+            final next = it.nextPaymentAfter(DateTime.now());
+            if (next == null) {
+              subtitleText = _cycleLabel(it.cycle);
+            } else {
+              subtitleText = '${_cycleLabel(it.cycle)} • Next: ${df.format(next)}';
+            }
+          }
           return Card(
             color: const Color(0xFF1C1C1E),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -81,7 +93,7 @@ class _RecurringIncomeListViewState extends State<RecurringIncomeListView> {
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
               subtitle: Text(
-                '${_cycleLabel(it.cycle)} • Next: ${df.format(next ?? DateTime.now())}',
+                subtitleText,
                 style: const TextStyle(color: Colors.white70),
               ),
               trailing: Row(
