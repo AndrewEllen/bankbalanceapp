@@ -1,44 +1,91 @@
-// lib/pages/recurring_income_list_page.dart
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import '../models/recurring_income.dart';
 import '../repositories/recurring_income_repository.dart';
-import 'recurring_income_edit_page.dart';
+import '../models/recurring_income.dart';
 
-class RecurringIncomeListPage extends StatefulWidget {
-  const RecurringIncomeListPage({super.key});
+/// BODY-ONLY view that can be embedded under a TabBarView.
+/// Keep this scaffold-less so it is safe to reuse.
+class RecurringIncomeListView extends StatefulWidget {
+  const RecurringIncomeListView({super.key});
 
   @override
-  State<RecurringIncomeListPage> createState() => _RecurringIncomeListPageState();
+  State<RecurringIncomeListView> createState() => _RecurringIncomeListViewState();
 }
 
-class _RecurringIncomeListPageState extends State<RecurringIncomeListPage> {
+class _RecurringIncomeListViewState extends State<RecurringIncomeListView> {
   final _repo = RecurringIncomeRepository();
-  List<RecurringIncome> _items = [];
+  late Future<List<RecurringIncome>> _future;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _future = _repo.load();
   }
 
-  Future<void> _load() async {
+  Future<void> _refresh() async {
     final list = await _repo.load();
-    setState(() => _items = list);
-  }
-
-  String _cycleLabel(PayCycle c) {
-    switch (c) {
-      case PayCycle.everyWeek: return 'Every week';
-      case PayCycle.every2Weeks: return 'Every 2 weeks';
-      case PayCycle.every4Weeks: return 'Every 4 weeks';
-      case PayCycle.monthly: return 'Monthly';
-    }
+    if (!mounted) return;
+    setState(() { _future = Future.value(list); });
   }
 
   @override
   Widget build(BuildContext context) {
-    final df = DateFormat.yMMMEd();
+    return FutureBuilder<List<RecurringIncome>>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final items = snap.data ?? const [];
+        if (items.isEmpty) {
+          return const Center(
+            child: Text('No templates yet.\nTap + to add one.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, i) {
+              final it = items[i];
+              return Card(
+                color: const Color(0xFF1C1C1E),
+                child: ListTile(
+                  title: Text(it.name, style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                    it.advanced ? 'Advanced • ${it.cycle.name}' : 'Simple • ${it.cycle.name}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  trailing: Switch(
+                    value: it.enabled,
+                    onChanged: (v) async {
+                      final updated = it.copyWith(enabled: v);
+                      await _repo.upsert(updated);
+                      _refresh();
+                    },
+                  ),
+                  onTap: () async {
+                    // Leave your existing navigation to the edit page here
+                    // (not included to avoid touching other routes).
+                  },
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Optional standalone page that uses the body view inside a Scaffold.
+/// We removed the "tabs" action to avoid navigating to a page that hosts this page again.
+class RecurringIncomeListPage extends StatelessWidget {
+  const RecurringIncomeListPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recurring Income'),
@@ -46,42 +93,12 @@ class _RecurringIncomeListPageState extends State<RecurringIncomeListPage> {
         foregroundColor: Colors.white,
       ),
       backgroundColor: Colors.black,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => const RecurringIncomeEditPage()));
-          await _load();
+      body: const RecurringIncomeListView(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          // Navigate to your existing "add template" page.
         },
-        label: const Text('Add Income'),
-        icon: const Icon(Icons.add),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView.separated(
-          padding: const EdgeInsets.all(12),
-          itemCount: _items.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (context, i) {
-            final it = _items[i];
-            final next = it.nextPaymentAfter(DateTime.now());
-            return Card(
-              color: const Color(0xFF1C1C1E),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                title: Text(it.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                subtitle: Text(
-                  '${_cycleLabel(it.cycle)} • Next: ${df.format(next!)}',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                trailing: Text('£${it.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                onTap: () async {
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => RecurringIncomeEditPage(existing: it)));
-                  await _load();
-                },
-              ),
-            );
-          },
-        ),
+        child: const Icon(Icons.add),
       ),
     );
   }

@@ -188,7 +188,7 @@ class _BottomNavBarState extends State<BottomNavBar> with SingleTickerProviderSt
                     _NavIcon(
                       icon: Icons.attach_money,
                       onPressed: () {
-                        Navigator.pushNamed(context, '/recurring');
+                        Navigator.pushNamed(context, '/recurring/tabs');
                       },
                     ),
                     _NavIcon(

@@ -6,6 +6,12 @@ import 'pages/recurring_income_list_page.dart';
 import 'pages/recurring_income_edit_page.dart';
 import 'pages/break_rules_page.dart';
 
+
+import 'pages/recurring_tabs_page.dart';
+
+import 'pages/pay_period_instance_list_page.dart';
+
+import 'pages/pay_period_instance_edit_page.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
@@ -31,6 +37,7 @@ class MyApp extends StatelessWidget {
       ),
       home: const HomePage(),
       routes: {
+        '/recurring/tabs': (_) => const RecurringTabsPage(),
         '/recurring': (_) => const RecurringIncomeListPage(),
         '/recurring/add': (_) => const RecurringIncomeEditPage(),
         '/break-rules': (_) => const BreakRulesPage(),
