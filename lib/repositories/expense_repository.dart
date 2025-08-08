@@ -41,6 +41,20 @@ class ExpenseRepository {
     await _saveAll(items);
   }
 
+  /// Insert or update an expense. If an expense with the same id exists
+  /// it will be replaced; otherwise it will be appended. This helper
+  /// simplifies editing existing expenses on the home page.
+  Future<void> upsert(Expense expense) async {
+    final items = await loadAll();
+    final idx = items.indexWhere((e) => e.id == expense.id);
+    if (idx == -1) {
+      items.add(expense);
+    } else {
+      items[idx] = expense;
+    }
+    await _saveAll(items);
+  }
+
   /// Clear all expenses.
   Future<void> clear() async {
     // Persist an empty array to clear expenses. LocalStore does not expose

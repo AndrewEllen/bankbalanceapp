@@ -65,8 +65,8 @@ class _HomePageState extends State<HomePage> {
       _refreshing = true;
     });
     await _loadFinancialData();
-    ///I like the animation
-    await Future.delayed(Duration(seconds: 2));
+    // Wait a short duration to allow the pull-to-refresh indicator to show
+    await Future.delayed(const Duration(seconds: 2));
     setState(() {
       _refreshing = false;
     });
@@ -75,7 +75,12 @@ class _HomePageState extends State<HomePage> {
   /// Compute financial summaries and update [_financeItems] and [_balance].
   Future<void> _loadFinancialData() async {
     final now = DateTime.now();
-    final manualBalance = await _balRepo.getBalance();
+    // Load manual balance and its timestamp. If the balance was set
+    // recently, past incomes/expenses before the timestamp should not
+    // influence the computed current balance.
+    final balData = await _balRepo.getBalanceData();
+    final manualBalance = balData['value'] as double;
+    final DateTime manualDate = balData['timestamp'] as DateTime;
     double pastIncomeSum = 0.0;
     double pastExpenseSum = 0.0;
     double upcomingIncomeSum = 0.0;
@@ -90,8 +95,11 @@ class _HomePageState extends State<HomePage> {
       final t = templateMap[inst.templateId];
       if (t == null || !t.enabled) continue;
       final amount = await _computeIncomeAmount(inst, t);
+      // Only include past incomes that occurred after the manual balance date
       if (!inst.paymentDate.isAfter(now)) {
-        pastIncomeSum += amount;
+        if (!inst.paymentDate.isBefore(manualDate)) {
+          pastIncomeSum += amount;
+        }
       } else {
         // upcoming; include only those within next 30 days for the upcoming summary.
         if (inst.paymentDate.difference(now).inDays <= 30) {
@@ -108,7 +116,10 @@ class _HomePageState extends State<HomePage> {
       // Move next to the first occurrence on or after a baseline (year 2000). We'll adjust in loop.
       // We want to account for multiple missed payments in the past.
       while (next.isBefore(now)) {
-        pastExpenseSum += e.amount;
+        // Only accumulate past expenses after manual balance date
+        if (!next.isBefore(manualDate)) {
+          pastExpenseSum += e.amount;
+        }
         next = _addCycle(next, e.cycle);
       }
       // Now next is on or after now. Accumulate upcoming payments up to 30 days.
@@ -121,7 +132,10 @@ class _HomePageState extends State<HomePage> {
     final exps = await _expRepo.loadAll();
     for (final exp in exps) {
       if (!exp.date.isAfter(now)) {
-        pastExpenseSum += exp.amount;
+        // Only include expenses dated after manual balance date
+        if (!exp.date.isBefore(manualDate)) {
+          pastExpenseSum += exp.amount;
+        }
       } else if (exp.date.difference(now).inDays <= 30) {
         upcomingExpenseSum += exp.amount;
       }
@@ -134,12 +148,60 @@ class _HomePageState extends State<HomePage> {
     items.add(_buildUpcomingSummaryRow(upcomingIncomeSum, upcomingExpenseSum));
     // Log expense row.
     items.add(_buildLogExpenseRow());
+
+    // Display one‑off expenses so users can edit or delete them. Sort by date
+    // descending (most recent first).
+    final sortedExps = List<Expense>.from(exps)..sort((a, b) => b.date.compareTo(a.date));
+    for (final exp in sortedExps) {
+      items.add(_buildExpenseItem(exp));
+    }
     if (mounted) {
       setState(() {
         _financeItems = items;
         _balance = currentBalance;
       });
     }
+  }
+
+  /// Build a card displaying a one‑off expense. Includes edit and delete
+  /// actions. Editing opens the same modal as logging an expense but
+  /// pre‑populated with the expense's details.
+  Widget _buildExpenseItem(Expense exp) {
+    final df = DateFormat.yMMMEd();
+    return Card(
+      color: const Color(0xFF1C1C1E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: ListTile(
+        title: Text(
+          exp.name,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          df.format(exp.date),
+          style: const TextStyle(color: Colors.white70),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit, color: Colors.white70),
+              onPressed: () async {
+                await _showEditExpenseDialog(exp);
+                await _loadFinancialData();
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.white70),
+              onPressed: () async {
+                await _expRepo.delete(exp.id);
+                await _loadFinancialData();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Add a cycle interval to a date based on [cycle]. Mirrors the logic used
@@ -335,136 +397,294 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Log Expense',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nameCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white54),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.deepPurple),
-                  ),
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                  left: 16,
+                  right: 16,
+                  top: 16,
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Amount',
-                  prefixText: '£',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  prefixStyle: TextStyle(color: Colors.white70),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white54),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.deepPurple),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Text('Date', style: TextStyle(color: Colors.white70)),
-                  const SizedBox(width: 16),
-                  TextButton(
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: date,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                        builder: (context, child) {
-                          return Theme(
-                            data: ThemeData.dark().copyWith(
-                              colorScheme: const ColorScheme.dark(
-                                primary: Colors.deepPurple,
-                                onPrimary: Colors.white,
-                                surface: Color(0xFF1C1C1E),
-                                onSurface: Colors.white,
-                              ),
-                              dialogBackgroundColor: Colors.black,
-                            ),
-                            child: child!,
-                          );
-                        },
-                      );
-                      if (picked != null) {
-                        date = picked;
-                        // Force rebuild to update button label
-                        // ignore: invalid_use_of_visible_for_testing_member
-                        (context as Element).markNeedsBuild();
-                      }
-                    },
-                    child: Text(
-                      DateFormat.yMMMEd().format(date),
-                      style: const TextStyle(color: Colors.deepPurple),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Log Expense',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.deepPurple),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amountCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Amount',
+                        prefixText: '£',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        prefixStyle: TextStyle(color: Colors.white70),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.deepPurple),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text('Date', style: TextStyle(color: Colors.white70)),
+                        const SizedBox(width: 16),
+                        TextButton(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: date,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                              builder: (context, child) {
+                                return Theme(
+                                  data: ThemeData.dark().copyWith(
+                                    colorScheme: const ColorScheme.dark(
+                                      primary: Colors.deepPurple,
+                                      onPrimary: Colors.white,
+                                      surface: Color(0xFF1C1C1E),
+                                      onSurface: Colors.white,
+                                    ),
+                                    dialogBackgroundColor: Colors.black,
+                                  ),
+                                  child: child!,
+                                );
+                              },
+                            );
+                            if (picked != null) {
+                              setModalState(() {
+                                date = picked;
+                              });
+                            }
+                          },
+                          child: Text(
+                            DateFormat.yMMMEd().format(date),
+                            style: const TextStyle(color: Colors.deepPurple),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                          },
+                          child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            final desc = nameCtrl.text.trim();
+                            final amt = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
+                            if (desc.isEmpty || amt <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Enter description and amount')),
+                              );
+                              return;
+                            }
+                            final expense = Expense(
+                              id: const Uuid().v4(),
+                              name: desc,
+                              amount: amt,
+                              date: date,
+                            );
+                            await _expRepo.add(expense);
+                            Navigator.pop(context);
+                            await _loadFinancialData();
+                          },
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                          child: const Text('Save'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                    },
-                    child: const Text('Cancel', style: TextStyle(color: Colors.white)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () async {
-                      final desc = nameCtrl.text.trim();
-                      final amt = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
-                      if (desc.isEmpty || amt <= 0) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter description and amount')));
-                        return;
-                      }
-                      final expense = Expense(
-                        id: const Uuid().v4(),
-                        name: desc,
-                        amount: amt,
-                        date: date,
-                      );
-                      await _expRepo.add(expense);
-                      Navigator.pop(context);
-                      await _loadFinancialData();
-                    },
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
-                    child: const Text('Save'),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
-    nameCtrl.dispose();
-    amountCtrl.dispose();
+    // Do not dispose controllers here; let garbage collector handle them.
+  }
+
+  /// Present a dialog for editing an existing expense. Pre‑populates the
+  /// fields with the expense's details. Saving updates the expense via
+  /// upsert, deleting via delete.
+  Future<void> _showEditExpenseDialog(Expense exp) async {
+    final nameCtrl = TextEditingController(text: exp.name);
+    final amountCtrl = TextEditingController(text: exp.amount.toString());
+    DateTime date = exp.date;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                  left: 16,
+                  right: 16,
+                  top: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Edit Expense',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.deepPurple),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amountCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Amount',
+                        prefixText: '£',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        prefixStyle: TextStyle(color: Colors.white70),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.deepPurple),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text('Date', style: TextStyle(color: Colors.white70)),
+                        const SizedBox(width: 16),
+                        TextButton(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: date,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                              builder: (context, child) {
+                                return Theme(
+                                  data: ThemeData.dark().copyWith(
+                                    colorScheme: const ColorScheme.dark(
+                                      primary: Colors.deepPurple,
+                                      onPrimary: Colors.white,
+                                      surface: Color(0xFF1C1C1E),
+                                      onSurface: Colors.white,
+                                    ),
+                                    dialogBackgroundColor: Colors.black,
+                                  ),
+                                  child: child!,
+                                );
+                              },
+                            );
+                            if (picked != null) {
+                              setModalState(() {
+                                date = picked;
+                              });
+                            }
+                          },
+                          child: Text(
+                            DateFormat.yMMMEd().format(date),
+                            style: const TextStyle(color: Colors.deepPurple),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                          },
+                          child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            final desc = nameCtrl.text.trim();
+                            final amt = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
+                            if (desc.isEmpty || amt <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Enter description and amount')),
+                              );
+                              return;
+                            }
+                            final updated = Expense(
+                              id: exp.id,
+                              name: desc,
+                              amount: amt,
+                              date: date,
+                            );
+                            await _expRepo.upsert(updated);
+                            Navigator.pop(context);
+                          },
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                          child: const Text('Save'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    // Do not dispose controllers
   }
 
 
