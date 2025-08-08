@@ -5,6 +5,7 @@ import 'pay_period.dart' as pp;
 class PayPeriodInstance {
   final String id; // unique id
   final String templateId; // recurring income id
+  late String templateName;
   final DateTime periodStart;
   final DateTime periodEnd;
   final DateTime paymentDate;
@@ -21,9 +22,10 @@ class PayPeriodInstance {
   /// For simple templates: an ad-hoc override amount (£) for this instance only.
   final double? simpleOverrideAmount;
 
-  const PayPeriodInstance({
+  PayPeriodInstance({
     required this.id,
     required this.templateId,
+    this.templateName = "Pay Period",
     required this.periodStart,
     required this.periodEnd,
     required this.paymentDate,
@@ -33,9 +35,11 @@ class PayPeriodInstance {
     this.simpleOverrideAmount,
   });
 
+
   PayPeriodInstance copyWith({
     String? id,
     String? templateId,
+    String? templateName, // NEW
     DateTime? periodStart,
     DateTime? periodEnd,
     DateTime? paymentDate,
@@ -47,6 +51,7 @@ class PayPeriodInstance {
     return PayPeriodInstance(
       id: id ?? this.id,
       templateId: templateId ?? this.templateId,
+      templateName: templateName ?? this.templateName, // NEW
       periodStart: periodStart ?? this.periodStart,
       periodEnd: periodEnd ?? this.periodEnd,
       paymentDate: paymentDate ?? this.paymentDate,
@@ -60,6 +65,7 @@ class PayPeriodInstance {
   Map<String, dynamic> toJson() => {
         'id': id,
         'templateId': templateId,
+        'templateName': templateName,
         'periodStart': periodStart.toIso8601String(),
         'periodEnd': periodEnd.toIso8601String(),
         'paymentDate': paymentDate.toIso8601String(),
@@ -89,6 +95,7 @@ class PayPeriodInstance {
     return PayPeriodInstance(
       id: j['id'] as String,
       templateId: j['templateId'] as String,
+      templateName: j['templateName'] as String? ?? '',
       periodStart: DateTime.parse(j['periodStart'] as String),
       periodEnd: DateTime.parse(j['periodEnd'] as String),
       paymentDate: DateTime.parse(j['paymentDate'] as String),

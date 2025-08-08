@@ -43,6 +43,7 @@ class _PayPeriodInstanceListPageState extends State<PayPeriodInstanceListPage> {
         inst = PayPeriodInstance(
           id: const Uuid().v4(),
           templateId: t.id,
+          templateName: t.name,
           periodStart: ps,
           periodEnd: pe,
           paymentDate: nextPayday,

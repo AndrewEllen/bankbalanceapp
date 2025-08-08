@@ -121,38 +121,6 @@ class RecurringIncome {
 
 }
 
-
-extension RecurringIncomeCopyExt on RecurringIncome {
-  RecurringIncome copyWith({
-    String? id,
-    String? name,
-    double? amount,
-    PayCycle? cycle,
-    DateTime? firstPaymentDate,
-    bool? enabled,
-    bool? advanced,
-    double? hourly,
-    double? overtimeHourly,
-    double? defaultDailyHours,
-    List<DayHours>? periodDays,
-  }) {
-    return RecurringIncome(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      amount: amount ?? this.amount,
-      cycle: cycle ?? this.cycle,
-      firstPaymentDate: firstPaymentDate ?? this.firstPaymentDate,
-      enabled: enabled ?? this.enabled,
-      advanced: advanced ?? this.advanced,
-      hourly: hourly ?? this.hourly,
-      overtimeHourly: overtimeHourly ?? this.overtimeHourly,
-      defaultDailyHours: defaultDailyHours ?? this.defaultDailyHours,
-      periodDays: periodDays ?? this.periodDays,
-    );
-  }
-}
-
-
 String encodeRecurring(List<RecurringIncome> r) =>
     jsonEncode(r.map((e) => e.toJson()).toList());
 
