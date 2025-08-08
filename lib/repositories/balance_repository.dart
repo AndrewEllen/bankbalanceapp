@@ -39,9 +39,11 @@ class BalanceRepository {
   Future<Map<String, dynamic>> getBalanceData() async {
     final raw = await _store.readString(_storageKey);
     if (raw == null || raw.isEmpty) {
+      // No manual balance set yet – use zero and epoch timestamp so that
+      // all historical incomes and expenses are included in the balance.
       return {
         'value': 0.0,
-        'timestamp': DateTime.now(),
+        'timestamp': DateTime.fromMillisecondsSinceEpoch(0),
       };
     }
     try {

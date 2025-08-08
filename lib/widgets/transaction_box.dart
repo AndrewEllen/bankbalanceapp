@@ -6,13 +6,18 @@ import 'package:shimmer/shimmer.dart';
 import '../models/transaction_model.dart'; // your model
 
 class TransactionItem extends StatelessWidget {
+  /// Index used when generating dummy data. Ignored when [model] is provided.
   final int index;
   final bool loading;
+  /// Optional transaction model to display. When provided, the item uses
+  /// [model] instead of generating random data. If null, dummy data is used.
+  final TransactionModel? model;
 
   const TransactionItem({
     super.key,
     required this.index,
     this.loading = false,
+    this.model,
   });
 
   TransactionModel _generateTransaction(int index) {
@@ -100,25 +105,11 @@ class TransactionItem extends StatelessWidget {
       );
     }
 
-    // Actual transaction display
-    final transaction = _generateTransaction(index);
+    // Actual transaction display. Use provided model if available, else dummy.
+    final transaction = model ?? _generateTransaction(index);
     final currency = NumberFormat.currency(locale: 'en_GB', symbol: '£')
         .format(transaction.transactionAmount);
-
-    final categories = [
-      'Grocery',
-      'Transport',
-      'Dining',
-      'Entertainment',
-      'Subscription',
-      'Transfer',
-      'Refund',
-      'Fuel',
-      'From Friend',
-      'Income',
-    ];
-
-    final category = categories[index % categories.length];
+    final category = model?.category ?? _defaultCategoryForIndex(index);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -172,5 +163,22 @@ class TransactionItem extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Provide a deterministic default category for dummy transactions.
+  String _defaultCategoryForIndex(int idx) {
+    const categories = [
+      'Grocery',
+      'Transport',
+      'Dining',
+      'Entertainment',
+      'Subscription',
+      'Transfer',
+      'Refund',
+      'Fuel',
+      'From Friend',
+      'Income',
+    ];
+    return categories[idx % categories.length];
   }
 }

@@ -15,8 +15,19 @@ import '../models/recurring_expense.dart';
 import '../models/expense.dart';
 import '../services/deductions_service.dart';
 import '../extensions/recurring_extensions.dart';
+import '../models/transaction_model.dart';
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
+
+/// Internal record pairing a [TransactionModel] with an optional originating
+/// [Expense] object. When [expense] is provided the transaction represents
+/// a one‑off expense that can be edited or deleted; otherwise it is a pay
+/// period income and should not be editable.
+class _Record {
+  final TransactionModel model;
+  final Expense? expense;
+  _Record({required this.model, this.expense});
+}
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -132,28 +143,74 @@ class _HomePageState extends State<HomePage> {
     final exps = await _expRepo.loadAll();
     for (final exp in exps) {
       if (!exp.date.isAfter(now)) {
-        // Only include expenses dated after manual balance date
+        // Only include transactions dated after manual balance date
         if (!exp.date.isBefore(manualDate)) {
-          pastExpenseSum += exp.amount;
+          if (exp.income) {
+            pastIncomeSum += exp.amount;
+          } else {
+            pastExpenseSum += exp.amount;
+          }
         }
       } else if (exp.date.difference(now).inDays <= 30) {
-        upcomingExpenseSum += exp.amount;
+        // Upcoming within 30 days
+        if (exp.income) {
+          upcomingIncomeSum += exp.amount;
+        } else {
+          upcomingExpenseSum += exp.amount;
+        }
       }
     }
     // Compute current balance: manual base + past incomes - past expenses.
     final currentBalance = manualBalance + pastIncomeSum - pastExpenseSum;
-    // Build upcoming summary widgets.
+    // Build widgets list. First add upcoming summary and log buttons.
     final List<Widget> items = [];
-    // Upcoming summary row.
     items.add(_buildUpcomingSummaryRow(upcomingIncomeSum, upcomingExpenseSum));
-    // Log expense row.
     items.add(_buildLogExpenseRow());
 
-    // Display one‑off expenses so users can edit or delete them. Sort by date
-    // descending (most recent first).
-    final sortedExps = List<Expense>.from(exps)..sort((a, b) => b.date.compareTo(a.date));
-    for (final exp in sortedExps) {
-      items.add(_buildExpenseItem(exp));
+    // Build transaction records for past incomes and one‑off expenses after manual date.
+    final List<_Record> records = [];
+    // Past incomes from pay period instances
+    for (final inst in instances) {
+      final t = templateMap[inst.templateId];
+      if (t == null || !t.enabled) continue;
+      if (!inst.paymentDate.isAfter(now) && !inst.paymentDate.isBefore(manualDate)) {
+        final amount = await _computeIncomeAmount(inst, t);
+        // Skip zero amounts
+        if (amount > 0) {
+          final tm = TransactionModel(
+            transactionAmount: amount,
+            transactionTime: inst.paymentDate,
+            income: true,
+            category: 'Income',
+            description: t.name,
+          );
+          records.add(_Record(model: tm));
+        }
+      }
+    }
+    // Past one‑off expenses/incomes
+    for (final exp in exps) {
+      if (!exp.date.isAfter(now) && !exp.date.isBefore(manualDate)) {
+        final tm = TransactionModel(
+          transactionAmount: exp.amount,
+          transactionTime: exp.date,
+          income: exp.income,
+          category: exp.category,
+          description: exp.name,
+        );
+        records.add(_Record(model: tm, expense: exp));
+      }
+    }
+    // Sort by date descending (most recent first)
+    records.sort((a, b) => b.model.transactionTime.compareTo(a.model.transactionTime));
+    // Append a widget for each record. Use TransactionItem for incomes; for expenses attach edit/delete.
+    int transIndex = 0;
+    for (final rec in records) {
+      if (rec.expense != null) {
+        items.add(_buildExpenseItem(rec.expense!));
+      } else {
+        items.add(TransactionItem(index: transIndex++, model: rec.model));
+      }
     }
     if (mounted) {
       setState(() {
@@ -177,13 +234,31 @@ class _HomePageState extends State<HomePage> {
           exp.name,
           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        subtitle: Text(
-          df.format(exp.date),
-          style: const TextStyle(color: Colors.white70),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              df.format(exp.date),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            if (exp.category != null)
+              Text(
+                exp.category!,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+          ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(
+              '${exp.income ? '+' : '-'}£${exp.amount.toStringAsFixed(2)}',
+              style: TextStyle(
+                color: exp.income ? Colors.greenAccent : Colors.redAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(width: 4),
             IconButton(
               icon: const Icon(Icons.edit, color: Colors.white70),
               onPressed: () async {
@@ -203,6 +278,7 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
 
   /// Add a cycle interval to a date based on [cycle]. Mirrors the logic used
   /// in recurring income. For weekly cycles it adds 7/14/28 days; for monthly
@@ -389,6 +465,20 @@ class _HomePageState extends State<HomePage> {
     final nameCtrl = TextEditingController();
     final amountCtrl = TextEditingController();
     DateTime date = DateTime.now();
+    bool isIncome = false;
+    String? selectedCategory;
+    final categories = [
+      'Grocery',
+      'Transport',
+      'Dining',
+      'Entertainment',
+      'Subscription',
+      'Transfer',
+      'Refund',
+      'Fuel',
+      'From Friend',
+      'Income',
+    ];
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -412,8 +502,53 @@ class _HomePageState extends State<HomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Log Expense',
+                      'Log Transaction',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                    ),
+                    const SizedBox(height: 12),
+                    // Type selector: expense vs income
+                    Row(
+                      children: [
+                        const Text('Income', style: TextStyle(color: Colors.white70)),
+                        const SizedBox(width: 12),
+                        Switch(
+                          value: isIncome,
+                          onChanged: (val) {
+                            setModalState(() {
+                              isIncome = val;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        Text(isIncome ? 'Income' : 'Expense', style: const TextStyle(color: Colors.white)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Category selector
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: 'Category',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        enabledBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                        focusedBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.deepPurple),
+                        ),
+                      ),
+                      dropdownColor: Colors.black,
+                      value: selectedCategory,
+                      items: categories
+                          .map((c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(c, style: const TextStyle(color: Colors.white)),
+                              ))
+                          .toList(),
+                      onChanged: (val) {
+                        setModalState(() {
+                          selectedCategory = val;
+                        });
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -503,9 +638,9 @@ class _HomePageState extends State<HomePage> {
                           onPressed: () async {
                             final desc = nameCtrl.text.trim();
                             final amt = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
-                            if (desc.isEmpty || amt <= 0) {
+                            if (desc.isEmpty || amt <= 0 || selectedCategory == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Enter description and amount')),
+                                const SnackBar(content: Text('Enter description, amount and category')),
                               );
                               return;
                             }
@@ -514,6 +649,8 @@ class _HomePageState extends State<HomePage> {
                               name: desc,
                               amount: amt,
                               date: date,
+                              income: isIncome,
+                              category: selectedCategory,
                             );
                             await _expRepo.add(expense);
                             Navigator.pop(context);
@@ -532,7 +669,7 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
-    // Do not dispose controllers here; let garbage collector handle them.
+    // Do not dispose controllers here.
   }
 
   /// Present a dialog for editing an existing expense. Pre‑populates the
@@ -542,6 +679,20 @@ class _HomePageState extends State<HomePage> {
     final nameCtrl = TextEditingController(text: exp.name);
     final amountCtrl = TextEditingController(text: exp.amount.toString());
     DateTime date = exp.date;
+    bool isIncome = exp.income;
+    String? selectedCategory = exp.category;
+    final categories = [
+      'Grocery',
+      'Transport',
+      'Dining',
+      'Entertainment',
+      'Subscription',
+      'Transfer',
+      'Refund',
+      'Fuel',
+      'From Friend',
+      'Income',
+    ];
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -565,8 +716,51 @@ class _HomePageState extends State<HomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Edit Expense',
+                      'Edit Transaction',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text('Income', style: TextStyle(color: Colors.white70)),
+                        const SizedBox(width: 12),
+                        Switch(
+                          value: isIncome,
+                          onChanged: (val) {
+                            setModalState(() {
+                              isIncome = val;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        Text(isIncome ? 'Income' : 'Expense', style: const TextStyle(color: Colors.white)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: 'Category',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        enabledBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                        focusedBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.deepPurple),
+                        ),
+                      ),
+                      dropdownColor: Colors.black,
+                      value: selectedCategory,
+                      items: categories
+                          .map((c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(c, style: const TextStyle(color: Colors.white)),
+                              ))
+                          .toList(),
+                      onChanged: (val) {
+                        setModalState(() {
+                          selectedCategory = val;
+                        });
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -656,9 +850,9 @@ class _HomePageState extends State<HomePage> {
                           onPressed: () async {
                             final desc = nameCtrl.text.trim();
                             final amt = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
-                            if (desc.isEmpty || amt <= 0) {
+                            if (desc.isEmpty || amt <= 0 || selectedCategory == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Enter description and amount')),
+                                const SnackBar(content: Text('Enter description, amount and category')),
                               );
                               return;
                             }
@@ -667,6 +861,8 @@ class _HomePageState extends State<HomePage> {
                               name: desc,
                               amount: amt,
                               date: date,
+                              income: isIncome,
+                              category: selectedCategory,
                             );
                             await _expRepo.upsert(updated);
                             Navigator.pop(context);
@@ -756,17 +952,10 @@ class _HomePageState extends State<HomePage> {
                       // Actual scrollable list with additional finance items
                       ListView.builder(
                         controller: scrollController,
-                        itemCount: _financeItems.length + 50,
+                        itemCount: _financeItems.length,
                         padding: const EdgeInsets.all(16),
                         itemBuilder: (context, index) {
-                          if (index < _financeItems.length) {
-                            return _financeItems[index];
-                          }
-                          final txIndex = index - _financeItems.length;
-                          return TransactionItem(
-                            index: txIndex,
-                            loading: _refreshing,
-                          );
+                          return _financeItems[index];
                         },
                       ),
 
